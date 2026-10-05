@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import websockets
 
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import APConnectionError, APRefused, ConnectOptions, candidate_urls, open_session
@@ -75,7 +76,8 @@ async def test_receives_items_chat_and_deaths_from_other_players(ap_server, tmp_
 
     sent = await next_matching(bot, lambda pk: isinstance(pk, p.PrintJSON) and pk.type == "ItemSend")
     assert sent.item.location == location and sent.item.player == 3
-    assert not store.location_name("ChecksFinder", location).startswith("Lieu #")
+    checksum = bot.room_info.datapackage_checksums["ChecksFinder"]
+    assert not store.location_name("ChecksFinder", checksum, location).startswith("Lieu #")
 
     chat = await next_matching(bot, lambda pk: isinstance(pk, p.PrintJSON) and pk.type == "Chat")
     assert (chat.slot, chat.message) == (3, "salut")
@@ -126,3 +128,22 @@ async def test_iteration_ends_when_server_stops():
     assert bot.closed
     with pytest.raises(APConnectionError):
         await bot.get(["_read_race_mode"])
+
+
+async def test_bad_addresses_and_servers_raise_connection_errors(monkeypatch):
+    with pytest.raises(APConnectionError):
+        await open_session("https://archipelago.gg/tracker/AbC", BOT)
+
+    async def silent(ws):
+        await ws.wait_closed()
+
+    async def broken(ws):
+        await ws.send('[{"cmd": "RoomInfo"}]')
+        await ws.wait_closed()
+
+    monkeypatch.setattr("archipelabot.ap.client.HANDSHAKE_TIMEOUT", 0.5)
+    for handler, message in ((silent, "no answer"), (broken, "invalid handshake")):
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            with pytest.raises(APConnectionError, match=message):
+                await open_session(f"ws://127.0.0.1:{port}", BOT)

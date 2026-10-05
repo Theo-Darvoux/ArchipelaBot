@@ -103,7 +103,7 @@ class Progress:
         progress = self[item.finder]
         if at is not None:
             progress.last_check = at
-        if not item.location_id or item.location_id in progress.checked:
+        if item.location_id <= 0 or item.location_id in progress.checked:
             return at is not None
         progress.checked.add(item.location_id)
         return True

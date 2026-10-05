@@ -13,11 +13,15 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-ROOM_URL = re.compile(r"^(?:(?P<scheme>https?)://)?(?P<host>[\w.-]+(?::\d+)?)/room/(?P<room>[\w-]+)/?$")
+ROOM_URL = re.compile(r"^(?:(?P<scheme>https?)://)?(?P<host>[\w.-]+(?::\d+)?)/room/(?P<room>[\w-]+)/?(?:[?#].*)?$")
 USER_AGENT = "ArchipelaBot (Discord bot)"
 
 
 class WebhostError(Exception):
+    pass
+
+
+class RoomNotFound(WebhostError):
     pass
 
 
@@ -69,6 +73,12 @@ def parse_http_date(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def is_web_link(text: str) -> bool:
+    """A web page address rather than a server's host:port."""
+    text = text.strip()
+    return text.startswith(("http://", "https://")) or ("://" not in text and "/" in text.rstrip("/"))
+
+
 def parse_room_url(text: str) -> WebhostRoom | None:
     match = ROOM_URL.match(text.strip())
     if not match:
@@ -85,7 +95,7 @@ class WebhostClient:
         try:
             async with self.session.get(url, headers={"User-Agent": USER_AGENT}) as response:
                 if response.status == 404:
-                    raise WebhostError("introuvable")
+                    raise RoomNotFound("introuvable")
                 response.raise_for_status()
                 return await response.json()
         except (aiohttp.ClientError, TimeoutError, ValueError) as e:
@@ -94,8 +104,8 @@ class WebhostClient:
     async def room_status(self, room: WebhostRoom) -> RoomStatus:
         try:
             return RoomStatus.from_json(await self._get_json(f"{room.base_url}/api/room_status/{room.room_id}"))
-        except WebhostError as e:
-            raise WebhostError("room introuvable" if str(e) == "introuvable" else str(e)) from e
+        except RoomNotFound as e:
+            raise RoomNotFound("room introuvable") from e
         except (KeyError, ValueError, TypeError) as e:
             raise WebhostError(f"réponse inattendue ({e})") from e
 

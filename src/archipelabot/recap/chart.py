@@ -2,12 +2,8 @@ import io
 from collections.abc import Callable
 from datetime import datetime, tzinfo
 
-import matplotlib
-
-matplotlib.use("Agg")
-
 import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.ticker import PercentFormatter
 
 from .stats import Recap, Series
@@ -22,7 +18,7 @@ PALETTE = [
     "#AF99EF", "#6D8BE8", "#00D2D2", "#FA8072", "#F0B232", "#57F287", "#EB459E", "#FEE75C",
     "#5865F2", "#ED4245", "#3BA55C", "#FAA61A", "#9B84EE", "#45DDC0", "#F47FFF", "#B9BBBE",
 ]  # fmt: skip
-FONTS = ["Inter", "Noto Sans", "DejaVu Sans"]
+FONT = {"family": ["Inter", "Noto Sans", "DejaVu Sans"], "size": 13}
 
 
 def value_at(series: Series, when: datetime) -> float:
@@ -35,9 +31,12 @@ def value_at(series: Series, when: datetime) -> float:
 
 
 def render_chart(recap: Recap, name_of: Callable[[int], str], tz: tzinfo) -> bytes:
-    """Completion over time for each player, with a star where they reached their goal. PNG bytes."""
-    plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": FONTS, "font.size": 13})
-    figure, axes = plt.subplots(figsize=(12, 6.5), dpi=130)
+    """Completion over time for each player, with a star where they reached their goal. PNG bytes.
+
+    Built without pyplot, whose global state isn't safe to share between the threads rendering recaps.
+    """
+    figure = Figure(figsize=(12, 6.5), dpi=130)
+    axes = figure.subplots()
     figure.patch.set_facecolor(BACKGROUND)
     axes.set_facecolor(BACKGROUND)
 
@@ -57,13 +56,13 @@ def render_chart(recap: Recap, name_of: Callable[[int], str], tz: tzinfo) -> byt
     axes.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m %Hh" if span.days else "%Hh%M", tz=tz))
     axes.xaxis.set_major_locator(mdates.AutoDateLocator(tz=tz, minticks=3, maxticks=9))
     axes.grid(color=GRID, linewidth=0.8)
-    axes.tick_params(colors=MUTED, length=0)
+    axes.tick_params(colors=MUTED, length=0, labelsize=FONT["size"], labelfontfamily=FONT["family"])
     for spine in axes.spines.values():
         spine.set_visible(False)
 
     legend = axes.legend(
         loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=min(4, max(1, len(ordered))),
-        frameon=False, labelcolor=TEXT, handlelength=1.4,
+        frameon=False, labelcolor=TEXT, handlelength=1.4, prop=FONT,
     )  # fmt: skip
     for line in legend.get_lines():
         line.set_linewidth(4)
@@ -71,5 +70,4 @@ def render_chart(recap: Recap, name_of: Callable[[int], str], tz: tzinfo) -> byt
     figure.tight_layout()
     buffer = io.BytesIO()
     figure.savefig(buffer, format="png", facecolor=BACKGROUND)
-    plt.close(figure)
     return buffer.getvalue()

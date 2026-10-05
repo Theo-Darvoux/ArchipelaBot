@@ -42,10 +42,14 @@ posteraient tout en double).
    ```sh
    git clone https://github.com/Theo-Darvoux/ArchipelaBot.git && cd ArchipelaBot
    cp .env.example .env   # puis remplis DISCORD_TOKEN
+   mkdir -p data && sudo chown 1000:1000 data   # le bot tourne sous l'utilisateur 1000 du conteneur
    docker compose up -d --build
    ```
 2. **Mise à jour** : `git pull && docker compose up -d --build`. Le `.env` et `data/` ne sont jamais touchés.
+   Si `data/` a été créé par une version qui tournait en root : `sudo chown -R 1000:1000 data` une fois avant.
 3. **Logs** : `docker compose logs -f`
+4. **Sauvegardes** : le bot copie sa base chaque jour dans `data/backups/` (7 jours gardés). Pour restaurer :
+   arrête le bot, remplace `data/archipelabot.db` par une copie (et supprime `archipelabot.db-wal` / `-shm`), relance.
 
 Avec `DEV_GUILD_ID` dans le `.env`, les commandes ne sont disponibles que sur ce serveur Discord (mise à jour
 instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une heure à les afficher.
@@ -55,8 +59,8 @@ instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une 
 Tout message écrit dans le post d'une room est relayé dans le chat de la partie. Si tu as indiqué ton slot
 (« Je joue » ou `/claim`), il apparaît à ton nom : le bot ouvre pour ça une connexion de chat avec ton slot, annoncée
 dans le jeu, et la ferme après une heure sans message. Sinon, il apparaît au nom du slot du bot, signé
-`[Discord] Pseudo:`. La réaction du bot indique s'il est parti, s'il a été bloqué (les commandes `!` ne sont jamais
-relayées) ou si le bot n'est pas connecté. Les messages du chat de la partie apparaissent dans le fil. Désactivable
+`[Discord] Pseudo:`. Le bot réagit au message s'il a été bloqué (les commandes `!` ne sont jamais relayées) ou
+s'il n'a pas pu partir (bot pas connecté à la room). Les messages du chat de la partie apparaissent dans le fil. Désactivable
 dans `/track reglages`.
 
 ## Développement

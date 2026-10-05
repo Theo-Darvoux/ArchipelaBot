@@ -69,4 +69,7 @@ class NotifyService:
     async def run(self) -> None:
         while True:
             await asyncio.sleep(self.interval)
-            await self.flush()
+            try:
+                await self.flush()
+            except Exception:
+                log.exception("Could not send the notifications of %s", self.state.address)

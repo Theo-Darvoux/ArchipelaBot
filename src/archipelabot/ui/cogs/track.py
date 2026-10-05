@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -7,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ...ap.client import APConnectionError, APRefused
-from ...ap.webhost import WebhostError, parse_room_url
+from ...ap.webhost import WebhostError, is_web_link, parse_room_url
 from ...core.progress import Progress
 from ...core.room import RoomTracker
 from ...errors import UserError
@@ -23,6 +24,8 @@ from ..views import ConfirmView
 
 if TYPE_CHECKING:
     from ...bot import ArchipelaBot
+
+log = logging.getLogger(__name__)
 
 REFUSAL_MESSAGES = {
     "InvalidSlot": "Ce slot n'existe pas dans la room.",
@@ -57,6 +60,13 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
     ) -> None:
         guild = interaction.guild
         assert guild is not None
+        webhost = parse_room_url(lien)
+        if webhost is None and is_web_link(lien):
+            kind = "d'un tracker" if "/tracker/" in lien else "d'une page qui n'est pas une room"
+            raise UserError(
+                f"C'est le lien {kind}. Colle le lien de la room (`archipelago.gg/room/…`) ou l'adresse du serveur "
+                "(`hôte:port`)."
+            )
         config = await self.bot.guild_configs.get(guild.id)
         forum = guild.get_channel(config.forum_id) if config.forum_id else None
         if forum is None or forum.type != discord.ChannelType.forum:
@@ -69,7 +79,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         )  # fmt: skip
 
         woke = False
-        if webhost := parse_room_url(lien):
+        if webhost:
             record.webhost = webhost
             try:
                 status = await self.bot.webhost.room_status(webhost)
@@ -137,7 +147,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             except APRefused as e:
                 reasons = [REFUSAL_MESSAGES.get(err, err) for err in e.errors]
                 raise UserError("Le serveur a refusé la connexion : " + " ".join(reasons)) from e
-            except APConnectionError as e:
+            except (APConnectionError, TimeoutError) as e:
                 if attempt == attempts - 1:
                     raise UserError(f"Impossible de joindre le serveur `{record.address}`.") from e
                 await asyncio.sleep(WAKE_DELAY)
@@ -160,12 +170,24 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         runtime = self._room_here(interaction)
         self._check_manager(interaction, runtime)
 
+        def stopped_already() -> bool:
+            return self.bot.rooms.get(runtime.record.id) is not runtime
+
         async def stop_with_recap() -> str:
-            await self.bot.rooms.publish_recap(runtime)
+            if stopped_already():
+                return f"{E.stopped} Ce suivi est déjà arrêté."
+            try:
+                await self.bot.rooms.publish_recap(runtime)
+                text = f"{E.stopped} Suivi arrêté, récap publié."
+            except Exception:
+                log.exception("Could not publish the recap of room %s", runtime.record.id)
+                text = f"{E.stopped} Suivi arrêté, mais le récap n'a pas pu être publié."
             await self.bot.rooms.stop(runtime, "finished")
-            return f"{E.stopped} Suivi arrêté, récap publié."
+            return text
 
         async def stop() -> str:
+            if stopped_already():
+                return f"{E.stopped} Ce suivi est déjà arrêté."
             await self.bot.rooms.stop(runtime, "stopped")
             return f"{E.stopped} Suivi arrêté. Le post reste consultable."
 

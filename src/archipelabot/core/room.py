@@ -4,7 +4,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ..ap import protocol as p
 from ..ap.client import APConnectionError, APError, APRefused, APSession, ConnectOptions, open_session
@@ -27,9 +27,14 @@ type Waker = Callable[[], Awaitable[None]]
 @dataclass(frozen=True, slots=True)
 class SlotInfo:
     slot: int
-    name: str
+    name: str  # what clients connect with
     game: str
     is_group: bool = False
+    alias: str = ""  # set with !alias, shown by the server as "Alias (Name)"
+
+    @property
+    def display(self) -> str:
+        return self.alias or self.name
 
 
 @dataclass
@@ -46,8 +51,12 @@ class RoomState:
 
     def name(self, slot: int) -> str:
         if info := self.slots.get(slot):
-            return info.name
+            return info.display
         return "Serveur" if slot == 0 else f"Joueur {slot}"
+
+    def slot_name(self, slot: int) -> str:
+        info = self.slots.get(slot)
+        return info.name if info else self.name(slot)
 
     def game(self, slot: int) -> str:
         info = self.slots.get(slot)
@@ -58,7 +67,7 @@ class RoomState:
         return [s for s in self.slots.values() if not s.is_group]
 
     def slot_by_name(self, name: str) -> int | None:
-        return next((s.slot for s in self.slots.values() if s.name == name), None)
+        return next((s.slot for s in self.slots.values() if name in (s.name, s.display)), None)
 
     def is_online(self, slot: int) -> bool:
         """A game client is connected to this slot."""
@@ -113,6 +122,7 @@ class RoomTracker:
         self._task: asyncio.Task[None] | None = None
         self._bulk: _Bulk | None = None
         self._said: deque[tuple[int, str]] = deque(maxlen=50)
+        self._checksums: dict[str, str] = {}
 
     def subscribe(self, listener: Listener) -> None:
         self._listeners.append(listener)
@@ -122,7 +132,7 @@ class RoomTracker:
     async def start(self) -> None:
         session = await self._connect()
         await self._set_connection(ev.ConnectionState.CONNECTED)
-        self._task = asyncio.create_task(self._run(session), name=f"room {self.state.address}")
+        self._spawn(session)
 
     async def stop(self) -> None:
         if self._task:
@@ -149,7 +159,8 @@ class RoomTracker:
     async def _connect(self) -> APSession:
         session = await open_session(self.state.address, self.options)
         try:
-            if missing := self.datapackages.missing(session.room_info.datapackage_checksums):
+            self._checksums = session.room_info.datapackage_checksums
+            if missing := self.datapackages.missing(self._checksums):
                 self.datapackages.add(await session.get_data_package(missing))
         except BaseException:
             await session.close()
@@ -158,7 +169,7 @@ class RoomTracker:
         self.state.team, self.state.own_slot = connected.team, connected.slot
         aliases = {player.slot: player.alias for player in connected.players}
         self.state.slots = {
-            slot: SlotInfo(slot, aliases.get(slot, info.name), info.game, bool(info.type & p.SlotType.GROUP))
+            slot: SlotInfo(slot, info.name, info.game, bool(info.type & p.SlotType.GROUP), aliases.get(slot, ""))
             for slot, info in sorted(connected.slot_info.items())
         }
         try:
@@ -194,14 +205,22 @@ class RoomTracker:
         return ev.HintInfo(
             finder=hint.finding_player,
             receiver=hint.receiving_player,
-            item=self.datapackages.item_name(self.state.game(hint.receiving_player), hint.item),
-            location=self.datapackages.location_name(self.state.game(hint.finding_player), hint.location),
+            item=self._item_name(hint.receiving_player, hint.item),
+            location=self._location_name(hint.finding_player, hint.location),
             flags=hint.item_flags,
             status=p.HintStatus.FOUND if hint.found else hint.status,
             found=hint.found,
             entrance=hint.entrance,
             location_id=hint.location,
         )
+
+    def _item_name(self, receiver: int, item_id: int) -> str:
+        game = self.state.game(receiver)
+        return self.datapackages.item_name(game, self._checksums.get(game, ""), item_id)
+
+    def _location_name(self, finder: int, location_id: int) -> str:
+        game = self.state.game(finder)
+        return self.datapackages.location_name(game, self._checksums.get(game, ""), location_id)
 
     async def _update_hints(self, raw_hints: list[dict]) -> None:
         changed = False
@@ -217,7 +236,15 @@ class RoomTracker:
             await self._emit(ev.HintsChanged())
 
     def resume(self) -> None:
-        self._task = asyncio.create_task(self._run(None), name=f"room {self.state.address}")
+        self._spawn(None)
+
+    def _spawn(self, session: APSession | None) -> None:
+        self._task = asyncio.create_task(self._run(session), name=f"room {self.state.address}")
+        self._task.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: asyncio.Task[None]) -> None:
+        if not task.cancelled() and (error := task.exception()):
+            log.error("Tracking of %s stopped unexpectedly", self.state.address, exc_info=error)
 
     async def _run(self, session: APSession | None) -> None:
         if session is None:
@@ -260,6 +287,9 @@ class RoomTracker:
             except (APError, OSError, TimeoutError) as e:
                 log.debug("Reconnect to %s failed: %s", self.state.address, e)
                 continue
+            except Exception:
+                log.exception("Unexpected error reconnecting to %s", self.state.address)
+                continue
             await self._set_connection(ev.ConnectionState.CONNECTED)
             return session
 
@@ -292,6 +322,8 @@ class RoomTracker:
                     await self._emit(ev.ClientStatusChanged(slot, status))
             case p.PrintJSON(type="ItemSend", item=p.NetworkItem() as item, receiving=int(receiver)):
                 await self._item_sent(self._item_event(item, receiver))
+            case p.PrintJSON(type="ItemCheat", item=p.NetworkItem() as item, receiving=int(receiver)):
+                await self._emit(self._item_event(item, receiver, finder=0))
             case p.PrintJSON(type="Release", slot=int(slot)):
                 await self._start_bulk(ev.Released, slot)
             case p.PrintJSON(type="Collect", slot=int(slot)):
@@ -317,15 +349,16 @@ class RoomTracker:
                 await self._emit(ev.Death(str(packet.data.get("source", "?")), packet.data.get("cause") or None))
             case p.RoomUpdate(players=list(players)):
                 for player in players:
-                    if (info := self.state.slots.get(player.slot)) and info.name != player.alias:
-                        self.state.slots[player.slot] = SlotInfo(info.slot, player.alias, info.game, info.is_group)
+                    if (info := self.state.slots.get(player.slot)) and info.alias != player.alias:
+                        self.state.slots[player.slot] = replace(info, alias=player.alias)
 
-    def _item_event(self, item: p.NetworkItem, receiver: int) -> ev.ItemSent:
+    def _item_event(self, item: p.NetworkItem, receiver: int, finder: int | None = None) -> ev.ItemSent:
+        finder = item.player if finder is None else finder
         return ev.ItemSent(
-            finder=item.player,
+            finder=finder,
             receiver=receiver,
-            item=self.datapackages.item_name(self.state.game(receiver), item.item),
-            location=self.datapackages.location_name(self.state.game(item.player), item.location),
+            item=self._item_name(receiver, item.item),
+            location=self._location_name(finder, item.location),
             flags=item.flags,
             location_id=item.location,
         )

@@ -42,7 +42,6 @@ class RoomRecord:
     webhost: WebhostRoom | None = None
     thread_id: int | None = None
     panel_message_id: int | None = None
-    hints_message_id: int | None = None
     settings: RoomSettings = field(default_factory=RoomSettings)
     status: RoomStatus = "active"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(microsecond=0))
@@ -81,9 +80,6 @@ class RoomRepo:
     async def save_settings(self, room: RoomRecord) -> None:
         await self._update(room, "settings = ?", room.settings.model_dump_json())
 
-    async def save_hints_message(self, room: RoomRecord) -> None:
-        await self._update(room, "hints_message_id = ?", room.hints_message_id)
-
     async def save_address(self, room: RoomRecord) -> None:
         await self._update(room, "address = ?", room.address)
 
@@ -105,7 +101,6 @@ class RoomRepo:
                 guild_id=row["guild_id"],
                 thread_id=row["thread_id"],
                 panel_message_id=row["panel_message_id"],
-                hints_message_id=row["hints_message_id"],
                 name=row["name"],
                 address=row["address"],
                 webhost=WebhostRoom(row["webhost_base"], row["webhost_room"]) if row["webhost_room"] else None,

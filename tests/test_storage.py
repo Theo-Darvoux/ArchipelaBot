@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.ap.protocol import ItemFlags
 from archipelabot.ap.webhost import WebhostRoom
 from archipelabot.storage.claims import ClaimRepo, NotifMode, NotifPrefs
@@ -109,3 +110,30 @@ async def test_history(db):
     snaps = [Snapshot(t0, 1, 3, 10), Snapshot(t0, 2, 0, None)]
     await history.snapshot(room.id, snaps)
     assert await history.snapshots(room.id) == snaps
+
+
+def test_data_packages_of_two_versions_of_a_game_coexist():
+    def wire(checksum, item):
+        return {"checksum": checksum, "item_name_to_id": {item: 1}, "location_name_to_id": {"Lieu": 2}}
+
+    store = DataPackageStore(None)
+    store.add({"Game": wire("v1", "Old sword")})
+    assert store.missing({"Game": "v1"}) == [] and store.missing({"Game": "v2"}) == ["Game"]
+    store.add({"Game": wire("v2", "New sword")})
+    assert store.item_name("Game", "v1", 1) == "Old sword"
+    assert store.item_name("Game", "v2", 1) == "New sword"
+    assert store.item_name("Game", "unknown", 1) == "New sword"  # best effort
+    assert store.location_name("Other", "", 2) == "Lieu #2"
+
+
+async def test_backups_are_rotated(db, tmp_path):
+    await GuildRepo(db).save(GuildConfig(1, forum_id=5))
+    for day in range(1, 5):
+        (tmp_path / f"archipelabot-2026-01-0{day}.db").touch()
+    backup = await db.backup(tmp_path, keep=3)
+
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["archipelabot-2026-01-03.db", "archipelabot-2026-01-04.db", backup.name]
+    copy = await Database.open(backup)
+    assert (await GuildRepo(copy).get(1)).forum_id == 5
+    await copy.close()

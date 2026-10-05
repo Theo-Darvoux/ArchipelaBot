@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -14,6 +14,7 @@ import discord
 from discord import ui
 
 from ..ap.client import ConnectOptions
+from ..ap.webhost import RoomNotFound
 from ..core import events as ev
 from ..core.chat import ChatRelay
 from ..core.progress import Progress, direct_baseline, webhost_baseline
@@ -24,6 +25,7 @@ from ..recap.stats import Recap, build_recap
 from ..storage.claims import ClaimRepo, NotifMode, NotifPrefs
 from ..storage.history import HistoryRepo
 from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
+from .emojis import E
 from .forum import TAG_SPECS, RoomTag
 from .panel_buttons import ClaimButton, MyHintsButton, SettingsButton
 from .render.feed import feed_view
@@ -44,20 +46,29 @@ log = logging.getLogger(__name__)
 
 BOT_TAGS = ("TextOnly", "DeathLink")
 KEEP_AWAKE = timedelta(hours=24)
+ABANDONED_AFTER = timedelta(days=7)
 
 
 class ThreadSink:
     """Everything the services post goes through here."""
 
-    def __init__(self, bot: "ArchipelaBot", record: RoomRecord) -> None:
+    def __init__(self, bot: "ArchipelaBot", record: RoomRecord, on_gone: Callable[[], None] = lambda: None) -> None:
         self.bot = bot
         self.record = record
+        self.on_gone = on_gone
 
     async def thread(self) -> discord.Thread:
         thread_id = self.record.thread_id
-        channel = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+        try:
+            channel = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+        except discord.NotFound:
+            self.on_gone()
+            raise
         if channel.type != discord.ChannelType.public_thread:
             raise TypeError(f"channel {thread_id} is not a forum post")
+        if channel.archived:  # type: ignore[union-attr]
+            # Messages of an archived post can't be edited: posts archive after a week without messages.
+            await channel.edit(archived=False)  # type: ignore[union-attr]
         return channel  # type: ignore[return-value]
 
     @property
@@ -83,9 +94,6 @@ class ThreadSink:
         message = await (await self.thread()).fetch_message(self.record.panel_message_id)
         if not message.pinned:
             await message.pin(reason="Panel de la room")
-
-    async def delete_message(self, message_id: int) -> None:
-        await (await self.thread()).get_partial_message(message_id).delete()
 
     async def set_tag(self, tag: RoomTag) -> None:
         thread = await self.thread()
@@ -143,6 +151,10 @@ class RoomRuntime:
         last = self.progress_service.last_activity
         return last is None or (now or datetime.now(UTC)) - last < KEEP_AWAKE
 
+    def abandoned(self, now: datetime | None = None) -> bool:
+        last = self.progress_service.last_activity or self.record.created_at
+        return (now or datetime.now(UTC)) - last >= ABANDONED_AFTER
+
     def _claimant_with_mode(self, slot: int, mode: NotifMode) -> int | None:
         user = self.claims.get(slot)
         return user if user is not None and self.prefs.mode(user) == mode else None
@@ -172,16 +184,6 @@ class RoomRuntime:
     def _buttons(self, *kinds: type[ui.DynamicItem]) -> list[ui.Item] | None:
         return [kind(self.record.id) for kind in kinds] if self.active else None
 
-    async def remove_hint_board(self) -> None:
-        """Hints used to have a public board in the post; they're now shown on demand only."""
-        if self.record.hints_message_id is not None:
-            try:
-                await self.sink.delete_message(self.record.hints_message_id)
-            except discord.NotFound:
-                pass
-            self.record.hints_message_id = None
-            await self.repo.save_hints_message(self.record)
-
     def can_manage(self, user_id: int, permissions: discord.Permissions) -> bool:
         return user_id == self.record.created_by or permissions.manage_threads
 
@@ -193,8 +195,9 @@ class RoomRuntime:
         return SettingsView(self.record.name, self.record.settings.model_copy(), save)
 
     def slot_named(self, name: str) -> int:
+        wanted = name.strip().casefold()
         for info in self.tracker.state.players:
-            if info.name.casefold() == name.strip().casefold():
+            if wanted in (info.name.casefold(), info.display.casefold()):
                 return info.slot
         raise UserError(f"Aucun joueur nommé **{md(name)}** dans cette room.")
 
@@ -203,7 +206,7 @@ class RoomRuntime:
         if owner is not None and owner != user_id and not force:
             raise UserError(f"Ce slot est déjà pris par <@{owner}>.")
         self.claims[slot] = user_id
-        await self.claim_repo.set(self.record.id, slot, self.tracker.state.name(slot), user_id)
+        await self.claim_repo.set(self.record.id, slot, self.tracker.state.slot_name(slot), user_id)
         self.panel.request_update(urgent=True)
 
     async def unclaim(self, slot: int) -> None:
@@ -256,7 +259,7 @@ class RoomManager:
         self.repo = RoomRepo(bot.db)
         self.claim_repo = ClaimRepo(bot.db)
         self.history = HistoryRepo(bot.db)
-        self._finishing: dict[int, asyncio.Task[None]] = {}
+        self._stopping: dict[int, asyncio.Task[None]] = {}
         self._rooms: dict[int, RoomRuntime] = {}
 
     def get(self, room_id: int) -> RoomRuntime | None:
@@ -282,11 +285,18 @@ class RoomManager:
         if webhost := record.webhost:
 
             async def resolve_webhost() -> str | None:
-                return await self.bot.webhost.current_address(webhost)
+                try:
+                    return await self.bot.webhost.current_address(webhost)
+                except RoomNotFound:
+                    self._abandon_soon(record.id, f"La room n'existe plus sur {webhost.host}")
+                    raise
 
             async def wake_webhost() -> None:
                 runtime = self._rooms.get(record.id)
-                if runtime is None or runtime.worth_waking():
+                if runtime is not None and runtime.abandoned():
+                    days = ABANDONED_AFTER.days
+                    self._abandon_soon(record.id, f"Aucune activité dans la room depuis {days} jours")
+                elif runtime is None or runtime.worth_waking():
                     await self.bot.webhost.wake(webhost)
 
             resolve, wake = resolve_webhost, wake_webhost
@@ -299,9 +309,9 @@ class RoomManager:
         assert record.id is not None
         runtime = RoomRuntime(
             record=record,
-            on_everyone_finished=lambda: self._finish_soon(record.id),
+            on_everyone_finished=lambda: self._later(record.id, self._finish),
             tracker=tracker,
-            sink=ThreadSink(self.bot, record),
+            sink=ThreadSink(self.bot, record, on_gone=lambda: self._later(record.id, self._forget)),
             repo=self.repo,
             claim_repo=self.claim_repo,
             prefs=self.bot.notif_prefs,
@@ -318,10 +328,6 @@ class RoomManager:
             asyncio.create_task(runtime.panel.run(), name=f"panel {record.id}"),
             asyncio.create_task(runtime.chat.run(), name=f"chat {record.id}"),
         ]
-        try:
-            await runtime.remove_hint_board()
-        except discord.HTTPException:
-            log.warning("Could not delete the hint board of room %s", record.id, exc_info=True)
         try:
             await runtime.sink.pin_panel()
         except discord.HTTPException:
@@ -343,21 +349,43 @@ class RoomManager:
             await runtime.claim(names[name], user)
         return len(previous)
 
-    def _finish_soon(self, room_id: int) -> None:
-        # Not awaited: stopping the room cancels the tracker task that is delivering this event.
-        if room_id not in self._finishing:
-            self._finishing[room_id] = asyncio.create_task(self._finish(room_id), name=f"finish {room_id}")
-
-    async def _finish(self, room_id: int) -> None:
+    def _later(self, room_id: int, job: Callable[[RoomRuntime], Awaitable[None]]) -> None:
+        """Stop a room in its own task: stopping it cancels the tracker task that may be calling this."""
         runtime = self._rooms.get(room_id)
-        if runtime is None:
+        if runtime is None or room_id in self._stopping:
             return
+        task = asyncio.create_task(job(runtime), name=f"{job.__name__} {room_id}")
+        self._stopping[room_id] = task
+        task.add_done_callback(lambda _: self._stopping.pop(room_id, None))
+
+    async def _finish(self, runtime: RoomRuntime) -> None:
         await runtime.feed.flush()
         try:
             await self.publish_recap(runtime)
         except Exception:
-            log.exception("Could not publish the recap of room %s", room_id)
+            log.exception("Could not publish the recap of room %s", runtime.record.id)
         await self.stop(runtime, "finished")
+
+    def _abandon_soon(self, room_id: int, reason: str) -> None:
+        async def abandon(runtime: RoomRuntime) -> None:
+            log.info("Stopping room %s: %s", room_id, reason)
+            try:
+                await runtime.sink.send_lines(FeedMessage((f"{E.stopped} {reason} : suivi arrêté.",)))
+            except discord.HTTPException:
+                log.warning("Could not announce the end of room %s", room_id, exc_info=True)
+            await self.stop(runtime, "stopped")
+
+        self._later(room_id, abandon)
+
+    async def _forget(self, runtime: RoomRuntime) -> None:
+        """The post was deleted: stop the room without touching Discord."""
+        log.info("The post of room %s was deleted, stopping it", runtime.record.id)
+        await self._detach(runtime)
+        await self.repo.set_status(runtime.record, "stopped")
+
+    def thread_deleted(self, thread_id: int) -> None:
+        if runtime := self.by_thread(thread_id):
+            self._later(runtime.record.id, self._forget)
 
     async def publish_recap(self, runtime: RoomRuntime) -> None:
         """Post the recap in the room's post, and in the guild's recap channel if there is one."""
@@ -382,14 +410,20 @@ class RoomManager:
     async def restore(self) -> None:
         """Resume every active room after a restart; they reconnect in the background."""
         for record in await self.repo.active():
-            tracker = self.build_tracker(record)
-            runtime = await self.attach(record, tracker)
+            try:
+                tracker = self.build_tracker(record)
+                runtime = await self.attach(record, tracker)
+            except Exception:
+                log.exception("Could not resume room %s", record.id)
+                continue
             # The layouts may have changed with a new version of the bot.
             runtime.panel.request_update()
             tracker.resume()
         log.info("Resumed %d rooms", len(self._rooms))
 
     async def stop(self, runtime: RoomRuntime, status: RoomStatus) -> None:
+        if self._rooms.get(runtime.record.id) is not runtime:
+            return
         await self._detach(runtime)
         await self.repo.set_status(runtime.record, status)
         try:
@@ -410,7 +444,8 @@ class RoomManager:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        with contextlib.suppress(Exception):
-            await runtime.feed.flush()
-            await runtime.notify.flush()
-            await runtime.progress_service.snapshot()
+        for flush in (runtime.feed.flush, runtime.notify.flush, runtime.progress_service.snapshot):
+            try:
+                await flush()
+            except Exception:
+                log.warning("Could not save the last events of room %s", runtime.record.id, exc_info=True)

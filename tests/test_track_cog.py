@@ -161,3 +161,105 @@ async def test_rooms_resume_after_restart(bot, discord_env, ap_server):
     runtime = bot.rooms.by_thread(forum.threads[0].id)
     await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
     assert forum.threads[0].pins == 1
+
+
+async def test_links_that_are_not_rooms(bot, discord_env):
+    guild, _ = discord_env
+    with pytest.raises(UserError, match="lien d'un tracker"):
+        await track(bot, guild, lien="https://archipelago.gg/tracker/AbC")
+    with pytest.raises(UserError, match="pas une room"):
+        await track(bot, guild, lien="https://archipelago.gg/seed/AbC")
+
+
+async def test_archived_posts_are_reopened(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    [thread] = forum.threads
+    thread.archived = True
+    runtime = bot.rooms.by_thread(thread.id)
+    await runtime.sink.edit_panel(runtime.render_panel())
+    assert not thread.archived
+
+
+class NotFoundResponse:
+    status = 404
+    reason = "Not Found"
+
+
+async def test_rooms_stop_when_their_post_is_deleted(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    await track(bot, guild, lien=f"127.0.0.1:{ap_server.port}", slot="Bob")
+    first, second = (bot.rooms.by_thread(t.id) for t in forum.threads)
+
+    await bot.on_raw_thread_delete(type("Payload", (), {"thread_id": first.record.thread_id})())
+    await wait_until(lambda: bot.rooms.get(first.record.id) is None)
+
+    # Deleted while the bot wasn't watching: noticed the next time the bot posts.
+    forum.threads.remove(next(t for t in forum.threads if t.id == second.record.thread_id))
+
+    async def fetch_channel(_channel_id):
+        raise discord.NotFound(NotFoundResponse(), "Unknown Channel")
+
+    bot.fetch_channel = fetch_channel
+    with pytest.raises(discord.NotFound):
+        await second.sink.edit_panel(second.render_panel())
+    await wait_until(lambda: bot.rooms.get(second.record.id) is None)
+
+    for runtime in (first, second):
+        assert (await bot.rooms.repo.get(runtime.record.id)).status == "stopped"
+
+
+async def test_rooms_idle_for_a_week_are_stopped(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    [thread] = forum.threads
+    runtime = bot.rooms.by_thread(thread.id)
+    now = datetime.now(UTC)
+    runtime.progress_service.last_activity = now - timedelta(days=6)
+    assert not runtime.abandoned(now)
+    runtime.progress_service.last_activity = now - timedelta(days=8)
+    assert runtime.abandoned(now)
+
+    bot.rooms._abandon_soon(runtime.record.id, "Aucune activité")
+    await wait_until(lambda: bot.rooms.get(runtime.record.id) is None)
+    assert any("Aucune activité : suivi arrêté" in text for text in thread.texts())
+    assert (await bot.rooms.repo.get(runtime.record.id)).status == "stopped"
+
+
+async def test_a_room_that_cannot_resume_does_not_block_the_others(bot, discord_env, ap_server):
+    guild, _ = discord_env
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    await track(bot, guild, lien=f"127.0.0.1:{ap_server.port}", slot="Bob")
+    await bot.rooms.shutdown()
+
+    bot.rooms = RoomManager(bot)
+    build = bot.rooms.build_tracker
+
+    def build_tracker(record):
+        if record.slot == "Alice":
+            raise RuntimeError("corrupted record")
+        return build(record)
+
+    bot.rooms.build_tracker = build_tracker
+    await bot.rooms.restore()
+    assert [r.record.slot for r in bot.rooms._rooms.values()] == ["Bob"]
+
+
+async def test_stop_buttons_only_work_once(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    [thread] = forum.threads
+    cog = bot.get_cog("track")
+    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
+    await cog.stop.callback(cog, interaction)
+    view = interaction.response.sent[0]["view"]
+    stop_button = next(b for b in view.walk_children() if getattr(b, "label", "") == "Arrêter et publier le récap")
+
+    first, second = FakeInteraction(guild=guild), FakeInteraction(guild=guild)
+    await stop_button.callback(first)
+    await stop_button.callback(second)
+    assert "Suivi arrêté" in view_text(first.edited[0]["view"])
+    assert second.response.deferred and not second.edited
+    assert all(b.disabled for b in view.walk_children() if isinstance(b, discord.ui.Button))
+    assert sum("Récap" in text or "Partie terminée" in text for text in thread.texts()) == 1

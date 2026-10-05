@@ -1,3 +1,6 @@
+import asyncio
+import hashlib
+import json
 import logging
 
 import aiohttp
@@ -18,6 +21,9 @@ from .ui.panel_buttons import ClaimButton, MyHintsButton, SettingsButton
 from .ui.rooms import RoomManager
 
 log = logging.getLogger(__name__)
+
+BACKUP_INTERVAL = 24 * 3600
+BACKUPS_KEPT = 7
 
 EXTENSIONS = (
     "archipelabot.ui.cogs.config",
@@ -72,6 +78,7 @@ class ArchipelaBot(commands.Bot):
         self.rooms = RoomManager(self)
         self.http_session: aiohttp.ClientSession | None = None
         self.command_ids: dict[str, int] = {}
+        self._backups: asyncio.Task[None] | None = None
 
     @property
     def webhost(self) -> WebhostClient:
@@ -89,27 +96,47 @@ class ArchipelaBot(commands.Bot):
         await self.load_extensions()
         await self.sync_commands()
         await self.rooms.restore()
+        self._backups = asyncio.create_task(self.backup_loop(), name="backups")
 
     async def close(self) -> None:
+        if self._backups:
+            self._backups.cancel()
         await self.rooms.shutdown()
         if self.http_session:
             await self.http_session.close()
         await super().close()
+
+    async def backup_loop(self) -> None:
+        directory = self.settings.database_path.parent / "backups"
+        while True:
+            try:
+                log.info("Backed up the database to %s", await self.db.backup(directory, BACKUPS_KEPT))
+            except Exception:
+                log.exception("Could not back up the database")
+            await asyncio.sleep(BACKUP_INTERVAL)
 
     async def load_extensions(self) -> None:
         for extension in EXTENSIONS:
             await self.load_extension(extension)
 
     async def sync_commands(self) -> None:
-        if self.settings.dev_guild_id:
-            guild = discord.Object(self.settings.dev_guild_id)
+        """Send the commands to Discord only when they changed: syncing is heavily rate limited."""
+        guild = discord.Object(self.settings.dev_guild_id) if self.settings.dev_guild_id else None
+        if guild:
             self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("Synced %d commands to dev guild %d", len(synced), guild.id)
+        payload = [command.to_dict(self.tree) for command in self.tree.get_commands(guild=guild)]
+        digest = hashlib.sha256(json.dumps([guild and guild.id, payload], sort_keys=True).encode()).hexdigest()
+        marker = self.settings.database_path.parent / "commands.sha256"
+        where = f"dev guild {guild.id}" if guild else "global"
+        if marker.exists() and marker.read_text() == digest:
+            commands = await self.tree.fetch_commands(guild=guild)
+            log.info("Commands unchanged (%s), not syncing", where)
         else:
-            synced = await self.tree.sync()
-            log.info("Synced %d global commands", len(synced))
-        self.command_ids = {command.name: command.id for command in synced}
+            commands = await self.tree.sync(guild=guild)
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(digest)
+            log.info("Synced %d commands (%s)", len(commands), where)
+        self.command_ids = {command.name: command.id for command in commands}
 
     def command_mention(self, name: str) -> str:
         command_id = self.command_ids.get(name.split()[0])
@@ -117,3 +144,6 @@ class ArchipelaBot(commands.Bot):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%d guilds)", self.user, len(self.guilds))
+
+    async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
+        self.rooms.thread_deleted(payload.thread_id)

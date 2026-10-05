@@ -52,6 +52,7 @@ class FakeThread:
     type = discord.ChannelType.public_thread
 
     def __init__(self, id: int, name: str, parent: "FakeForum", applied_tags: list) -> None:
+        self.archived = False
         self.id = id
         self.name = name
         self.parent = parent
@@ -76,9 +77,11 @@ class FakeThread:
     async def fetch_message(self, message_id: int) -> FakeMessage:
         return self.get_partial_message(message_id)
 
-    async def edit(self, *, applied_tags=None, **_kwargs) -> None:
+    async def edit(self, *, applied_tags=None, archived=None, **_kwargs) -> None:
         if applied_tags is not None:
             self.applied_tags = list(applied_tags)
+        if archived is not None:
+            self.archived = archived
 
     def texts(self) -> list[str]:
         """Feed messages: everything after the panel."""

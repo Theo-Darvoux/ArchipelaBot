@@ -48,7 +48,7 @@ class ChatRelay:
             if session is not None and not session.closed:
                 return session
             options = ConnectOptions(
-                slot=self.tracker.state.name(slot),
+                slot=self.tracker.state.slot_name(slot),
                 password=self.password,
                 tags=("TextOnly", "NoText"),
                 uuid=f"archipelabot-chat-{slot}",

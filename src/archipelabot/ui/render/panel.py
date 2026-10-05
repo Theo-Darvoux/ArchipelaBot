@@ -9,7 +9,7 @@ from ...core.events import ConnectionState
 from ...core.progress import Progress
 from ...core.room import RoomState
 from ..emojis import E
-from .text import md
+from .text import fit_lines, md
 
 # (icon, label)
 CONNECTION_LABELS: dict[ConnectionState, tuple[str, str]] = {
@@ -68,19 +68,10 @@ def player_line(slot: int, state: RoomState, progress: Progress, claims: dict[in
 def roster(state: RoomState, progress: Progress, claims: dict[int, int]) -> str:
     """Every player, best first; drops details then players if it doesn't fit in one message."""
     slots = progress.ranking()
-    lines: list[str] = []
-    for detailed in (True, False):
-        lines = [player_line(s, state, progress, claims, detailed=detailed) for s in slots]
-        if sum(len(line) + 1 for line in lines) <= ROSTER_BUDGET:
-            return "\n".join(lines)
-    kept: list[str] = []
-    size = 0
-    for line in lines:
-        if size + len(line) + 1 > ROSTER_BUDGET - 80:
-            break
-        kept.append(line)
-        size += len(line) + 1
-    return "\n".join([*kept, f"… et {len(lines) - len(kept)} autres · `/status joueur:` pour le détail"])
+    lines = [player_line(s, state, progress, claims, detailed=True) for s in slots]
+    if sum(len(line) + 1 for line in lines) > ROSTER_BUDGET:
+        lines = [player_line(s, state, progress, claims, detailed=False) for s in slots]
+    return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres · `/status joueur:` pour le détail")
 
 
 def connection_label(state: ConnectionState) -> str:

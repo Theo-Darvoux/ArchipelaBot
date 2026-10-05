@@ -2,6 +2,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import discord
+
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
 from archipelabot.core import events as ev
@@ -11,6 +13,7 @@ from archipelabot.recap.chart import render_chart
 from archipelabot.recap.stats import build_recap
 from archipelabot.storage.guilds import GuildConfig
 from archipelabot.storage.history import LoggedEvent, Snapshot
+from archipelabot.ui.emojis import E
 from archipelabot.ui.render.recap import duration, recap_view
 
 from .ap_server import requires_ap_server
@@ -128,3 +131,18 @@ async def test_recap_command_posts_in_the_thread(bot, discord_env, ap_server):  
     assert "Récap publié" in view_text(interaction.followup.sent[0]["view"])
     assert any(m.text.startswith("## 🏆 Récap") for m in thread.messages)
     assert bot.rooms.by_thread(thread.id) is not None  # the room keeps being tracked
+
+
+def test_recap_of_a_big_room_fits_in_one_message():
+    long_names = {i: SlotInfo(i, f"Joueur_{i:03}_xxxxx", "A Link to the Past Randomizer") for i in range(1, 81)}
+    state = RoomState("x:1", slots=long_names)
+    progress = Progress(state, clock=lambda: T0)
+    progress.apply_baseline(Baseline({i: set(range(i)) for i in long_names}, dict.fromkeys(long_names, 100)))
+    recap = build_recap("Gros async", T0, T0 + timedelta(days=3), state, progress, [], [])
+    # Uploaded icons are long custom emoji tags: render with those.
+    E.use({f"ring_{i}": discord.PartialEmoji(name=f"ap_ring_{i}_abcdef", id=10**18 + i) for i in range(9)})
+    try:
+        text = view_text(recap_view(recap, state, chart=True))
+    finally:
+        E.reset()
+    assert len(text) <= 4000 and "autres joueurs" in text

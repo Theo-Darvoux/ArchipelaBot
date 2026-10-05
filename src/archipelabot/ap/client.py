@@ -172,11 +172,17 @@ async def open_session(address: str, options: ConnectOptions) -> APSession:
     for url in candidate_urls(address):
         try:
             ws = await websockets.connect(url, max_size=None, open_timeout=HANDSHAKE_TIMEOUT)
-        except (OSError, ssl.SSLError, websockets.InvalidHandshake, TimeoutError) as e:
+        except (OSError, ssl.SSLError, websockets.WebSocketException, TimeoutError) as e:
             errors.append(f"{url}: {e}")
             continue
         try:
             return await asyncio.wait_for(_handshake(ws, url, options), HANDSHAKE_TIMEOUT)
+        except TimeoutError as e:
+            await ws.close()
+            raise APConnectionError(f"{url}: no answer to the handshake") from e
+        except (OSError, websockets.WebSocketException, ValueError, KeyError, TypeError) as e:
+            await ws.close()
+            raise APConnectionError(f"{url}: invalid handshake ({e})") from e
         except BaseException:
             await ws.close()
             raise

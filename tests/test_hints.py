@@ -9,7 +9,6 @@ from archipelabot.storage.rooms import RoomSettings
 from archipelabot.ui.panel_buttons import MyHintsButton
 from archipelabot.ui.render.feed import Line, render_event
 from archipelabot.ui.render.hints import all_hints_view, player_hints_view
-from archipelabot.ui.rooms import RoomManager
 
 from .ap_server import requires_ap_server
 from .fakes import FakeInteraction, FakeUser, view_text
@@ -89,7 +88,7 @@ async def test_hints_on_demand(bot, discord_env, ap_server):  # noqa: F811
     await track(bot, guild, lien=ap_server.address, slot="Alice")
     [thread] = forum.threads
     runtime = bot.rooms.by_thread(thread.id)
-    assert runtime.record.hints_message_id is None and len(thread.messages) == 1  # no public board
+    assert len(thread.messages) == 1  # no public board
 
     carol = await open_session(
         ap_server.address, ConnectOptions(slot="Carol", game="ChecksFinder", tags=(), uuid="carol")
@@ -123,20 +122,3 @@ async def test_hints_on_demand(bot, discord_env, ap_server):  # noqa: F811
     await MyHintsButton(runtime.record.id).callback(interaction)
     assert view_text(interaction.response.sent[0]["view"]).startswith("### Tes hints · Bob")
     await carol.close()
-
-
-@requires_ap_server
-async def test_the_old_public_board_is_deleted(bot, discord_env, ap_server):  # noqa: F811
-    guild, forum = discord_env
-    await track(bot, guild, lien=ap_server.address, slot="Alice")
-    [thread] = forum.threads
-    old_board = await thread.send(content="ancien tableau")
-    record = bot.rooms.by_thread(thread.id).record
-    record.hints_message_id = old_board.id
-    await bot.rooms.repo.save_hints_message(record)
-    await bot.rooms.shutdown()
-
-    bot.rooms = RoomManager(bot)
-    await bot.rooms.restore()
-    assert old_board not in thread.messages
-    assert (await bot.rooms.repo.get(record.id)).hints_message_id is None

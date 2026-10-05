@@ -11,7 +11,7 @@ async def slot_autocomplete(interaction: Interaction, current: str) -> list[app_
         return []
     choices = []
     for info in runtime.tracker.state.players:
-        if current.casefold() not in info.name.casefold():
+        if current.casefold() not in info.display.casefold():
             continue
         owner = runtime.claims.get(info.slot)
         note = ""
@@ -19,5 +19,5 @@ async def slot_autocomplete(interaction: Interaction, current: str) -> list[app_
             note = " · c'est toi"
         elif owner is not None:
             note = " · déjà pris"
-        choices.append(app_commands.Choice(name=truncate(f"{info.name} · {info.game}{note}", 100), value=info.name))
+        choices.append(app_commands.Choice(name=truncate(f"{info.display} · {info.game}{note}", 100), value=info.name))
     return choices[:25]

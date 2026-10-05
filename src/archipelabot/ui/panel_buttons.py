@@ -22,7 +22,7 @@ MAX_OPTIONS = 25  # Discord's limit for a select menu
 def claimed_message(runtime: "RoomRuntime", slot: int) -> str:
     info = runtime.tracker.state.slots[slot]
     return (
-        f"Tu joues **{md(info.name)}** · *{md(info.game)}*.\n"
+        f"Tu joues **{md(info.display)}** · *{md(info.game)}*.\n"
         "-# Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot te mentionnera "
         "dans le post de la room, une fois par absence. "
         "`/notifs` pour recevoir ça en DM, ou plus du tout."
@@ -38,14 +38,14 @@ class ClaimPicker(ui.LayoutView):
 
         text = f"### {E.claim} Quel slot est le tien ?"
         if mine:
-            text += "\nTu joues déjà : " + ", ".join(f"**{md(s.name)}**" for s in mine)
+            text += "\nTu joues déjà : " + ", ".join(f"**{md(s.display)}**" for s in mine)
         container = ui.Container(ui.TextDisplay(text))
         if free:
             select = ui.Select(
                 placeholder="Choisis ton slot",
                 options=[
                     discord.SelectOption(
-                        label=truncate(s.name, 100), description=truncate(s.game, 100), value=str(s.slot)
+                        label=truncate(s.display, 100), description=truncate(s.game, 100), value=str(s.slot)
                     )
                     for s in free[:MAX_OPTIONS]
                 ],

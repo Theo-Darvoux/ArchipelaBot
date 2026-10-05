@@ -25,11 +25,12 @@ class GameData:
 
 
 class DataPackageStore:
-    """Shared by every room: games are loaded once, from disk when possible."""
+    """Shared by every room: each version of a game is loaded once, from disk when possible."""
 
     def __init__(self, cache_dir: Path | None) -> None:
         self.cache_dir = cache_dir
-        self._games: dict[str, GameData] = {}
+        self._games: dict[tuple[str, str], GameData] = {}
+        self._latest: dict[str, GameData] = {}
 
     def _path(self, game: str, checksum: str) -> Path | None:
         if self.cache_dir is None or not checksum:
@@ -37,16 +38,19 @@ class DataPackageStore:
         safe = "".join(c if c.isalnum() else "_" for c in game)
         return self.cache_dir / f"{safe}-{checksum}.json"
 
+    def _store(self, game: str, data: GameData) -> None:
+        self._games[game, data.checksum] = self._latest[game] = data
+
     def missing(self, checksums: dict[str, str]) -> list[str]:
         """Games whose data isn't loaded at the right checksum, after trying the disk cache."""
         missing = []
         for game, checksum in checksums.items():
-            if (loaded := self._games.get(game)) and loaded.checksum == checksum:
+            if (game, checksum) in self._games:
                 continue
             path = self._path(game, checksum)
             if path and path.exists():
                 try:
-                    self._games[game] = GameData.from_wire(json.loads(path.read_text("utf-8")))
+                    self._store(game, GameData.from_wire(json.loads(path.read_text("utf-8"))))
                     continue
                 except (ValueError, KeyError):
                     log.warning("Corrupted data package cache %s, refetching", path)
@@ -55,15 +59,18 @@ class DataPackageStore:
 
     def add(self, games: dict[str, dict[str, Any]]) -> None:
         for game, raw in games.items():
-            self._games[game] = GameData.from_wire(raw)
+            self._store(game, GameData.from_wire(raw))
             if path := self._path(game, raw.get("checksum", "")):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps(raw), "utf-8")
 
-    def item_name(self, game: str, item_id: int) -> str:
-        data = self._games.get(game)
+    def _data(self, game: str, checksum: str) -> GameData | None:
+        return self._games.get((game, checksum)) or self._latest.get(game)
+
+    def item_name(self, game: str, checksum: str, item_id: int) -> str:
+        data = self._data(game, checksum)
         return (data and data.items.get(item_id)) or f"Item #{item_id}"
 
-    def location_name(self, game: str, location_id: int) -> str:
-        data = self._games.get(game)
+    def location_name(self, game: str, checksum: str, location_id: int) -> str:
+        data = self._data(game, checksum)
         return (data and data.locations.get(location_id)) or f"Lieu #{location_id}"

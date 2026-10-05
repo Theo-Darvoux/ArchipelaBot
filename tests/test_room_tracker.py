@@ -6,6 +6,8 @@ from archipelabot.ap import protocol as p
 from archipelabot.ap.client import APRefused, ConnectOptions, open_session
 from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.core import events as ev
+from archipelabot.core.chat import ChatRelay
+from archipelabot.core.progress import direct_baseline
 from archipelabot.core.room import WAKE_GRACE, RoomTracker
 
 from .ap_server import APServer, requires_ap_server
@@ -261,3 +263,54 @@ async def test_hints_added_prioritised_and_found(ap_server):
         await session.close()
     await tracker.stop()
     await late.stop()
+
+
+async def test_aliases_are_shown_but_never_used_to_connect(ap_server):
+    tracker, _ = await start_tracker(ap_server.address)
+    carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))
+    await carol.send(p.say_packet("!alias Caro"))
+    async with asyncio.timeout(5):
+        while tracker.state.name(CAROL) == "Carol":
+            await asyncio.sleep(0.05)
+    assert tracker.state.name(CAROL) == "Caro (Carol)" and tracker.state.slot_name(CAROL) == "Carol"
+    assert tracker.state.slot_by_name("Caro (Carol)") == tracker.state.slot_by_name("Carol") == CAROL
+
+    relay = ChatRelay(tracker, None)
+    await relay.say(CAROL, "coucou depuis Discord")  # connects as "Carol", not as the alias
+    assert CAROL in tracker.state.relay_slots
+    baseline = await direct_baseline(ap_server.address, None, tracker.state)
+    assert set(baseline.totals) == {ALICE, BOB, CAROL}
+
+    await relay.close_all()
+    await carol.close()
+    await tracker.stop()
+
+
+async def test_cheated_items_come_from_the_server(ap_server):
+    tracker, events = await start_tracker(ap_server.address)
+    carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))
+    await carol.send(p.say_packet("!getitem Map Width"))
+    item = await events.wait_for(lambda e: isinstance(e, ev.ItemSent))
+    assert (item.finder, item.receiver, item.item) == (0, CAROL, "Map Width")
+    await carol.close()
+    await tracker.stop()
+
+
+async def test_unexpected_errors_while_reconnecting_are_retried(ap_server):
+    tracker = RoomTracker(ap_server.address, BOT, DataPackageStore(None), retry_delays=(0.1,))
+    events = Recorder()
+    tracker.subscribe(events)
+    connect, calls = tracker._connect, 0
+
+    async def flaky():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("malformed packet")
+        return await connect()
+
+    tracker._connect = flaky
+    tracker.resume()
+    await events.wait_for(lambda e: e == ev.ConnectionChanged(ev.ConnectionState.CONNECTED, ap_server.address))
+    assert calls == 2
+    await tracker.stop()

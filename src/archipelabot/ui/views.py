@@ -1,5 +1,6 @@
 """Interactive Components V2 views."""
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,8 @@ from .render.text import md
 
 if TYPE_CHECKING:
     from .types import Interaction
+
+log = logging.getLogger(__name__)
 
 # (setting, icon, label, help)
 SETTING_TOGGLES: list[tuple[str, str, str, str]] = [
@@ -70,24 +73,44 @@ class ConfirmView(ui.LayoutView):
         self, question: str, actions: list[tuple[str, discord.ButtonStyle, Callable[[], Awaitable[str]]]]
     ) -> None:
         super().__init__(timeout=120)
-        buttons = []
+        self._answered = False
+        self.buttons: list[ui.Button] = []
         for label, style, action in actions:
             button = ui.Button(label=label, style=style)
             button.callback = self._run(action)
-            buttons.append(button)
+            self.buttons.append(button)
         cancel = ui.Button(label="Annuler", style=discord.ButtonStyle.secondary)
         cancel.callback = self._cancel
-        self.add_item(ui.Container(ui.TextDisplay(question), ui.ActionRow(*buttons, cancel)))
+        self.buttons.append(cancel)
+        self.add_item(ui.Container(ui.TextDisplay(question), ui.ActionRow(*self.buttons)))
+
+    def _answer(self) -> bool:
+        """Only the first click counts; the buttons are disabled for the next ones."""
+        if self._answered:
+            return False
+        self._answered = True
+        for button in self.buttons:
+            button.disabled = True
+        self.stop()
+        return True
 
     def _run(self, action: Callable[[], Awaitable[str]]) -> Callable[["Interaction"], Awaitable[None]]:
         async def callback(interaction: "Interaction") -> None:
-            await interaction.response.defer()
-            result = await action()
-            await interaction.edit_original_response(view=notice(result, Tone.SUCCESS))
-            self.stop()
+            if not self._answer():
+                await interaction.response.defer()
+                return
+            await interaction.response.edit_message(view=self)
+            try:
+                view = notice(await action(), Tone.SUCCESS)
+            except Exception:
+                log.exception("Confirmed action failed")
+                view = notice("Une erreur inattendue est survenue. Elle a été enregistrée dans les logs.", Tone.ERROR)
+            await interaction.edit_original_response(view=view)
 
         return callback
 
     async def _cancel(self, interaction: "Interaction") -> None:
+        if not self._answer():
+            await interaction.response.defer()
+            return
         await interaction.response.edit_message(view=notice("Annulé."))
-        self.stop()

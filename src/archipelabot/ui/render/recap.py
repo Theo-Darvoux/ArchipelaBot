@@ -6,11 +6,13 @@ from discord import ui
 from ...core.room import RoomState
 from ...recap.stats import Recap
 from ..emojis import E
-from .text import md, plural
+from .text import fit_lines, md, plural
 
 RECAP_COLOUR = discord.Colour(0xF0B232)
 CHART_FILENAME = "recap.png"
 MEDALS = ["🥇", "🥈", "🥉"]
+# A message's text displays share 4000 characters: the podium gets what the title and numbers leave.
+PODIUM_BUDGET = 3000
 
 
 def duration(delta: timedelta) -> str:
@@ -34,7 +36,7 @@ def podium(recap: Recap, state: RoomState) -> str:
     for slot, ratio in recap.unfinished:
         percent = "?" if ratio is None else f"{int(ratio * 100)}"
         lines.append(f"{E.ring(ratio)} {md(state.name(slot))} · *{md(state.game(slot))}* · {percent} %")
-    return "\n".join(lines)
+    return fit_lines(lines, PODIUM_BUDGET, lambda hidden: f"-# … et {plural(hidden, 'autre joueur', 'autres joueurs')}")
 
 
 def numbers(recap: Recap, state: RoomState) -> str:

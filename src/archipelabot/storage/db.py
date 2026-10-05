@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -98,5 +100,19 @@ class Database:
             log.info("Applying database migration %d", i)
             await self.conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {i};\nCOMMIT;")
 
+    async def backup(self, directory: Path, keep: int) -> Path:
+        """Today's copy of the database, keeping the `keep` most recent ones."""
+        await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
+        target = directory / f"archipelabot-{datetime.now(UTC):%Y-%m-%d}.db"
+        async with aiosqlite.connect(target) as copy:
+            await self.conn.backup(copy)
+        await asyncio.to_thread(_prune, directory, keep)
+        return target
+
     async def close(self) -> None:
         await self.conn.close()
+
+
+def _prune(directory: Path, keep: int) -> None:
+    for old in sorted(directory.glob("archipelabot-*.db"))[:-keep]:
+        old.unlink()

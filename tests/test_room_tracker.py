@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from archipelabot.ap import protocol as p
-from archipelabot.ap.client import APRefused, ConnectOptions, open_session
+from archipelabot.ap.client import APConnectionError, APRefused, ConnectOptions, open_session
 from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.core import events as ev
 from archipelabot.core.chat import ChatRelay
@@ -41,6 +41,12 @@ class Recorder:
 
     def of_type[T](self, cls: type[T]) -> list[T]:
         return [e for e in self.events if isinstance(e, cls)]
+
+
+async def wait_until(predicate, wait: float = 10.0) -> None:
+    async with asyncio.timeout(wait):
+        while not predicate():
+            await asyncio.sleep(0.05)
 
 
 async def start_tracker(address: str, **kwargs) -> tuple[RoomTracker, Recorder]:
@@ -249,10 +255,10 @@ async def test_hints_added_prioritised_and_found(ap_server):
     games = {ALICE: "Celeste 64", BOB: "A Short Hike"}
     other = await open_session(ap_server.address, game_client(receiver.name, games[target.player]))
     await other.send({"cmd": "UpdateHint", "player": CAROL, "location": target.location, "status": 30})
-    await events.wait_for(lambda e: tracker.state.hints[hint.key].status == p.HintStatus.PRIORITY)
+    await wait_until(lambda: tracker.state.hints[hint.key].status == p.HintStatus.PRIORITY)
 
     await carol.send(p.location_checks_packet([target.location]))
-    await events.wait_for(lambda e: tracker.state.hints[hint.key].found)
+    await wait_until(lambda: tracker.state.hints[hint.key].found)
     assert tracker.state.hints[hint.key].status == p.HintStatus.FOUND
     assert len(events.of_type(ev.HintAdded)) == 1
 
@@ -314,3 +320,75 @@ async def test_unexpected_errors_while_reconnecting_are_retried(ap_server):
     await events.wait_for(lambda e: e == ev.ConnectionChanged(ev.ConnectionState.CONNECTED, ap_server.address))
     assert calls == 2
     await tracker.stop()
+
+
+async def test_direct_rooms_that_stay_down_are_unreachable():
+    server = APServer()
+    tracker, events = await start_tracker(server.address, retry_delays=(0.1,))
+    server.stop()
+    try:
+        await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.UNREACHABLE)
+        await asyncio.sleep(0.5)
+        assert [e.state for e in events.of_type(ev.ConnectionChanged)] == [
+            ev.ConnectionState.CONNECTED,
+            ev.ConnectionState.RECONNECTING,
+            ev.ConnectionState.UNREACHABLE,
+        ]
+    finally:
+        await tracker.stop()
+
+
+async def test_hints_added_while_disconnected_are_announced(ap_server):
+    tracker, events = await start_tracker(ap_server.address, retry_delays=(1.0,))
+    carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))
+    await carol.send(p.location_scouts_packet(carol.connected.missing_locations))
+    info = await anext(pk async for pk in carol if isinstance(pk, p.LocationInfo))
+    target = info.locations[0]
+
+    await tracker._session.ws.close()
+    await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.RECONNECTING)
+    await carol.send({"cmd": "LocationScouts", "locations": [target.location], "create_as_hint": 2})
+    added = await events.wait_for(lambda e: isinstance(e, ev.HintAdded))
+    assert added.hint.location_id == target.location
+    assert ev.ConnectionState.CONNECTED in [e.state for e in events.of_type(ev.ConnectionChanged)[1:]]
+    await carol.close()
+    await tracker.stop()
+
+
+async def test_events_wait_until_listened_to(ap_server):
+    tracker = RoomTracker(ap_server.address, BOT, DataPackageStore(None))
+    await tracker.start(listen=False)
+    carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))
+    await carol.send(p.say_packet("trop tôt ?"))
+    await asyncio.sleep(0.5)
+
+    events = Recorder()
+    tracker.subscribe(events)
+    tracker.listen()
+    await events.wait_for(lambda e: e == ev.ChatMessage(CAROL, "trop tôt ?"))
+    await carol.close()
+    await tracker.stop()
+
+
+async def test_reconnect_after_a_refusal(ap_server):
+    tracker, events = await start_tracker(ap_server.address)
+    tracker.options = ConnectOptions(slot="Nobody")
+    await tracker.reconnect()
+    failed = await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.FAILED)
+    assert "InvalidSlot" in failed.detail
+
+    tracker.options = BOT
+    await tracker.reconnect()
+    await events.wait_for(lambda e: events.of_type(ev.ConnectionChanged)[-1].state == ev.ConnectionState.CONNECTED)
+    await tracker.stop()
+
+
+async def test_a_message_that_could_not_be_sent_is_not_awaited_as_an_echo():
+    class BrokenSession:
+        async def send(self, *_packets):
+            raise APConnectionError("connection closed")
+
+    tracker = RoomTracker("x:1", BOT, DataPackageStore(None))
+    with pytest.raises(APConnectionError):
+        await tracker.send_chat(BrokenSession(), CAROL, "perdu")
+    assert not tracker._said

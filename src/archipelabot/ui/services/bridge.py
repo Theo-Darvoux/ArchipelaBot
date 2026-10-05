@@ -17,6 +17,8 @@ def chat_text(content: str, attachment_urls: Sequence[str] = ()) -> str | None:
     text = CUSTOM_EMOJI.sub(r":\1:", content)
     text = TIMESTAMP.sub("(date)", text)
     text = " / ".join(line.strip() for line in text.splitlines() if line.strip())
+    # The server rejects any message that isn't printable (tabs, no-break spaces, emoji joiners...).
+    text = "".join(" " if c.isspace() else c for c in text if c.isprintable() or c.isspace()).strip()
     text = " ".join(part for part in (text, *attachment_urls) if part)
     if not text:
         return None

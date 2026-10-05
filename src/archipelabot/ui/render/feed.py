@@ -144,6 +144,11 @@ def connection_line(event: ev.ConnectionChanged, downtime: float | None) -> Line
                 f"-# {E.offline} La room s'est endormie. "
                 "Le suivi reprendra tout seul dès que quelqu'un ouvrira sa page."
             )
+        case ev.ConnectionState.UNREACHABLE:
+            return Line(f"-# {E.offline} Serveur injoignable. Le suivi reprendra tout seul dès qu'il répondra.")
         case ev.ConnectionState.FAILED:
-            return Line(f"{E.failed} Le serveur a refusé la connexion ({event.detail}). Suivi en pause.")
+            return Line(
+                f"{E.failed} Le serveur a refusé la connexion ({event.detail}). Suivi en pause : "
+                "`/track reconnect` pour réessayer."
+            )
     return None

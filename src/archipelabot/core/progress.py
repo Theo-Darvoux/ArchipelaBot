@@ -22,6 +22,7 @@ def utcnow() -> datetime:
 @dataclass
 class SlotProgress:
     checked: set[int] = field(default_factory=set)
+    restored: int = 0  # checks known only by their count, from the last snapshot before a restart
     total: int | None = None
     last_check: datetime | None = None
     deaths: int = 0
@@ -30,7 +31,7 @@ class SlotProgress:
 
     @property
     def done(self) -> int:
-        return len(self.checked)
+        return len(self.checked) + self.restored
 
     @property
     def ratio(self) -> float | None:
@@ -111,6 +112,7 @@ class Progress:
     def apply_baseline(self, baseline: Baseline) -> None:
         for slot, checked in baseline.checked.items():
             self[slot].checked |= checked
+            self[slot].restored = 0
         for slot, total in baseline.totals.items():
             self[slot].total = total
         for slot, at in baseline.last_activity.items():
@@ -119,19 +121,24 @@ class Progress:
                 progress.last_check = at
 
 
-async def webhost_baseline(client: WebhostClient, room: WebhostRoom, team: int) -> Baseline:
+async def webhost_baseline(
+    client: WebhostClient, room: WebhostRoom, team: int, totals: dict[int, int] | None = None
+) -> Baseline:
+    """`totals` never change: pass those of an earlier baseline to skip the static tracker."""
     status = await client.room_status(room)
     if not status.tracker:
         raise ValueError("this room has no tracker")
-    static = await client.static_tracker(room, status.tracker)
-    tracker = await client.tracker(room, status.tracker)
 
     def ours(rows: list[dict]) -> list[dict]:
         return [row for row in rows if row.get("team", 0) == team]
 
+    if not totals:
+        static = await client.static_tracker(room, status.tracker)
+        totals = {row["player"]: row["total_locations"] for row in ours(static.get("player_locations_total", []))}
+    tracker = await client.tracker(room, status.tracker)
     return Baseline(
         checked={row["player"]: set(row["locations"]) for row in ours(tracker.get("player_checks_done", []))},
-        totals={row["player"]: row["total_locations"] for row in ours(static.get("player_locations_total", []))},
+        totals=totals,
         last_activity={
             row["player"]: parse_http_date(row["time"])
             for row in ours(tracker.get("activity_timers", []))

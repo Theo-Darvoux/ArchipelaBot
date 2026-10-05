@@ -17,6 +17,7 @@ CONNECTION_LABELS: dict[ConnectionState, tuple[str, str]] = {
     ConnectionState.CONNECTED: ("online", "Connecté"),
     ConnectionState.RECONNECTING: ("reconnecting", "Reconnexion…"),
     ConnectionState.ASLEEP: ("asleep", "Room endormie"),
+    ConnectionState.UNREACHABLE: ("offline", "Serveur injoignable"),
     ConnectionState.FAILED: ("failed", "Connexion refusée"),
     ConnectionState.STOPPED: ("stopped", "Suivi arrêté"),
 }
@@ -25,6 +26,7 @@ CONNECTION_COLOURS: dict[ConnectionState, discord.Colour] = {
     ConnectionState.CONNECTED: discord.Colour.green(),
     ConnectionState.RECONNECTING: discord.Colour.orange(),
     ConnectionState.ASLEEP: discord.Colour.dark_grey(),
+    ConnectionState.UNREACHABLE: discord.Colour.orange(),
     ConnectionState.FAILED: discord.Colour.red(),
     ConnectionState.STOPPED: discord.Colour.dark_grey(),
 }

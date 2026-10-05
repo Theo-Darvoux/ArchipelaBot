@@ -79,8 +79,9 @@ class RoomState:
     def is_shared(self, slot: int) -> bool:
         return slot == self.own_slot or slot in self.relay_slots
 
-    def share(self, slot: int) -> None:
-        if self.is_online(slot):
+    def share(self, slot: int, online: bool) -> None:
+        """The bot now connects as `slot` too; `online`: whether a game was connected before it did."""
+        if online:
             self.games_on_shared.add(slot)
         else:
             self.games_on_shared.discard(slot)
@@ -123,25 +124,42 @@ class RoomTracker:
         self._bulk: _Bulk | None = None
         self._said: deque[tuple[int, str]] = deque(maxlen=50)
         self._checksums: dict[str, str] = {}
+        self._hints_loaded = False
 
     def subscribe(self, listener: Listener) -> None:
         self._listeners.append(listener)
 
     # --- lifecycle ------------------------------------------------------------------------------
 
-    async def start(self) -> None:
-        session = await self._connect()
+    async def start(self, *, listen: bool = True) -> None:
+        """Connect; with `listen=False`, packets wait until `listen()` so that no event is emitted unheard."""
+        await self._connect()
         await self._set_connection(ev.ConnectionState.CONNECTED)
-        self._spawn(session)
+        if listen:
+            self.listen()
+
+    def listen(self) -> None:
+        self._spawn(self._session)
 
     async def stop(self) -> None:
+        await self._halt()
+        await self._set_connection(ev.ConnectionState.STOPPED)
+
+    async def reconnect(self) -> None:
+        """Drop the connection (or give up waiting) and connect again right away."""
+        await self._halt()
+        await self._set_connection(ev.ConnectionState.CONNECTING)
+        self.resume()
+
+    async def _halt(self) -> None:
         if self._task:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+            self._task = None
         if self._session:
             await self._session.close()
-        await self._set_connection(ev.ConnectionState.STOPPED)
+        await self._finish_bulk()
 
     async def wait_closed(self) -> None:
         if self._task:
@@ -150,18 +168,23 @@ class RoomTracker:
     async def say(self, text: str) -> None:
         if self._session is None or self._session.closed:
             raise APConnectionError("not connected")
-        self.expect_echo(self.state.own_slot, text)
-        await self._session.send(p.say_packet(text))
+        await self.send_chat(self._session, self.state.own_slot, text)
 
-    def expect_echo(self, slot: int, text: str) -> None:
+    async def send_chat(self, session: APSession, slot: int, text: str) -> None:
+        """Say `text` through `session`, connected as `slot`, without relaying the server's echo back."""
         self._said.append((slot, text))
+        try:
+            await session.send(p.say_packet(text))
+        except BaseException:
+            self._said.remove((slot, text))
+            raise
 
     async def _connect(self) -> APSession:
         session = await open_session(self.state.address, self.options)
         try:
             self._checksums = session.room_info.datapackage_checksums
-            if missing := self.datapackages.missing(self._checksums):
-                self.datapackages.add(await session.get_data_package(missing))
+            if missing := await self.datapackages.missing(self._checksums):
+                await self.datapackages.add(await session.get_data_package(missing))
         except BaseException:
             await session.close()
             raise
@@ -173,11 +196,13 @@ class RoomTracker:
             for slot, info in sorted(connected.slot_info.items())
         }
         try:
-            await self._watch_storage(session)
+            added = await self._watch_storage(session)
         except BaseException:
             await session.close()
             raise
         self._session = session
+        for hint in added:
+            await self._emit(ev.HintAdded(hint))
         return session
 
     def _status_keys(self) -> dict[str, int]:
@@ -186,8 +211,11 @@ class RoomTracker:
     def _hint_keys(self) -> set[str]:
         return {p.hints_key(self.state.team, slot) for slot in self.state.slots}
 
-    async def _watch_storage(self, session: APSession) -> None:
-        """Client statuses and hints of every slot, then get notified of their changes."""
+    async def _watch_storage(self, session: APSession) -> list[ev.HintInfo]:
+        """Client statuses and hints of every slot, then get notified of their changes.
+
+        Returns the hints added while the bot was disconnected.
+        """
         status_keys, hint_keys = self._status_keys(), self._hint_keys()
         values = await session.get([*status_keys, *hint_keys])
         self.state.statuses = {slot: p.ClientStatus(values.get(key) or 0) for key, slot in status_keys.items()}
@@ -196,9 +224,11 @@ class RoomTracker:
             for slot in {self.state.own_slot, *self.state.relay_slots}
             if self.state.statuses.get(slot) in (p.ClientStatus.READY, p.ClientStatus.PLAYING)
         }
-        hints = [self._hint_info(raw) for key in hint_keys for raw in values.get(key) or []]
-        self.state.hints = {hint.key: hint for hint in hints}
+        hints = {hint.key: hint for key in hint_keys for hint in map(self._hint_info, values.get(key) or [])}
+        added = [h for k, h in hints.items() if k not in self.state.hints and not h.found] if self._hints_loaded else []
+        self.state.hints, self._hints_loaded = hints, True
         await session.send(p.set_notify_packet([*status_keys, *hint_keys]))
+        return added
 
     def _hint_info(self, raw: dict) -> ev.HintInfo:
         hint = p.Hint.model_validate(raw)
@@ -223,17 +253,11 @@ class RoomTracker:
         return self.datapackages.location_name(game, self._checksums.get(game, ""), location_id)
 
     async def _update_hints(self, raw_hints: list[dict]) -> None:
-        changed = False
         for hint in map(self._hint_info, raw_hints):
             previous = self.state.hints.get(hint.key)
-            if previous == hint:
-                continue
             self.state.hints[hint.key] = hint
-            changed = True
             if previous is None and not hint.found:
                 await self._emit(ev.HintAdded(hint))
-        if changed:
-            await self._emit(ev.HintsChanged())
 
     def resume(self) -> None:
         self._spawn(None)
@@ -257,7 +281,7 @@ class RoomTracker:
 
     async def _reconnect(self, *, wait_first: bool = True) -> APSession | None:
         attempt = 0 if wait_first else -1
-        asleep = 0
+        asleep = failures = 0
         while True:
             if attempt >= 0:
                 await asyncio.sleep(self.retry_delays[min(attempt, len(self.retry_delays) - 1)])
@@ -286,6 +310,9 @@ class RoomTracker:
                 return None
             except (APError, OSError, TimeoutError) as e:
                 log.debug("Reconnect to %s failed: %s", self.state.address, e)
+                failures += 1
+                if self.resolve_address is None and failures > WAKE_GRACE:
+                    await self._set_connection(ev.ConnectionState.UNREACHABLE)
                 continue
             except Exception:
                 log.exception("Unexpected error reconnecting to %s", self.state.address)

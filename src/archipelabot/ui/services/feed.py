@@ -98,7 +98,8 @@ class FeedService:
         if state == ev.ConnectionState.CONNECTED:
             down_since, self._down_since = self._down_since, None
             return None if down_since is None else self.clock() - down_since
-        if state in (ev.ConnectionState.RECONNECTING, ev.ConnectionState.ASLEEP) and self._down_since is None:
+        down = (ev.ConnectionState.RECONNECTING, ev.ConnectionState.ASLEEP, ev.ConnectionState.UNREACHABLE)
+        if state in down and self._down_since is None:
             self._down_since = self.clock()
         return None
 

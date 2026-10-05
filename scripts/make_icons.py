@@ -43,8 +43,6 @@ GLYPHS = {
     "death": ("skull", LIGHT),
     "hint": ("lightbulb", GOLD),
     "chat": ("chat_bubble", USEFUL),
-    "priority": ("star", GOLD),
-    "no_priority": ("arrow_downward", GREY),
     "avoid": ("block", TRAP),
     "connecting": ("hourglass_top", GREY),
     "reconnecting": ("sync", ORANGE),
@@ -56,9 +54,7 @@ GLYPHS = {
     "notif_thread": ("notifications", GOLD),
     "notif_dm": ("mail", USEFUL),
     "notif_off": ("notifications_off", GREY),
-    "success": ("check_circle", GREEN),
     "error": ("cancel", RED),
-    "warning": ("warning", ORANGE),
     "info": ("info", BLURPLE),
 }
 
@@ -98,13 +94,6 @@ def goal() -> Image.Image:
     return finish(image)
 
 
-def pill(colour: str) -> Image.Image:
-    image, draw = canvas()
-    full = SIZE * SCALE
-    draw.rounded_rectangle((full * 0.04, full * 0.30, full * 0.96, full * 0.70), radius=full * 0.2, fill=colour)
-    return finish(image)
-
-
 def glyph(name: str, colour: str, codepoints: dict[str, str]) -> Image.Image:
     font = ImageFont.truetype(str(FONT), int(SIZE * SCALE * 0.86))
     font.set_variation_by_axes([1, 0, 48, 500])  # filled, normal grade, 48 px optical size, medium weight
@@ -124,8 +113,6 @@ def main() -> None:
         "online": dot(GREEN, 0.34),
         "offline": dot(GREY, 0.34),
         "goal": goal(),
-        "bar_on": pill(PROGRESSION),
-        "bar_off": pill(TRACK),
         **{f"ring_{i}": ring(i) for i in range(RING_STEPS + 1)},
         **{name: glyph(symbol, colour, codepoints) for name, (symbol, colour) in GLYPHS.items()},
     }

@@ -45,6 +45,7 @@ class RoomRecord:
     settings: RoomSettings = field(default_factory=RoomSettings)
     status: RoomStatus = "active"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(microsecond=0))
+    ended_at: datetime | None = None
     id: int | None = None
 
 
@@ -74,6 +75,10 @@ class RoomRepo:
         rows = await self._select("WHERE id = ?", room_id)
         return rows[0] if rows else None
 
+    async def by_thread(self, thread_id: int) -> RoomRecord | None:
+        rows = await self._select("WHERE thread_id = ?", thread_id)
+        return rows[0] if rows else None
+
     async def active(self) -> list[RoomRecord]:
         return await self._select("WHERE status = 'active' ORDER BY id")
 
@@ -83,10 +88,13 @@ class RoomRepo:
     async def save_address(self, room: RoomRecord) -> None:
         await self._update(room, "address = ?", room.address)
 
+    async def save_password(self, room: RoomRecord) -> None:
+        await self._update(room, "password = ?", room.password)
+
     async def set_status(self, room: RoomRecord, status: RoomStatus) -> None:
         room.status = status
-        ended = "datetime('now')" if status != "active" else "NULL"
-        await self._update(room, f"status = ?, ended_at = {ended}", status)
+        room.ended_at = datetime.now(UTC).replace(microsecond=0) if status != "active" else None
+        await self._update(room, "status = ?, ended_at = ?", status, room.ended_at and room.ended_at.isoformat())
 
     async def _update(self, room: RoomRecord, assignments: str, *values: object) -> None:
         await self.db.conn.execute(f"UPDATE room SET {assignments} WHERE id = ?", (*values, room.id))
@@ -110,6 +118,7 @@ class RoomRepo:
                 status=row["status"],
                 created_by=row["created_by"],
                 created_at=_parse_utc(row["created_at"]),
+                ended_at=_parse_utc(row["ended_at"]) if row["ended_at"] else None,
             )
             for row in rows
         ]

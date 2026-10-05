@@ -9,6 +9,7 @@ class ConnectionState(StrEnum):
     CONNECTED = "connected"
     RECONNECTING = "reconnecting"
     ASLEEP = "asleep"
+    UNREACHABLE = "unreachable"
     FAILED = "failed"
     STOPPED = "stopped"
 
@@ -97,11 +98,6 @@ class HintAdded:
 
 
 @dataclass(frozen=True, slots=True)
-class HintsChanged:
-    """The hint list changed (new hint, found, priority...): `state.hints` is up to date."""
-
-
-@dataclass(frozen=True, slots=True)
 class ConnectionChanged:
     state: ConnectionState
     address: str
@@ -119,6 +115,5 @@ type Event = (
     | PlayerLeft
     | ClientStatusChanged
     | HintAdded
-    | HintsChanged
     | ConnectionChanged
 )

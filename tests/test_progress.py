@@ -13,7 +13,7 @@ from archipelabot.core.progress import Baseline, Progress, direct_baseline, webh
 from archipelabot.core.room import RoomState, SlotInfo
 from archipelabot.storage.history import HistoryRepo
 from archipelabot.storage.rooms import RoomRecord, RoomRepo
-from archipelabot.ui.services.progress import ProgressService
+from archipelabot.ui.services.progress import ProgressService, restore_progress
 
 from .ap_server import requires_ap_server
 
@@ -90,7 +90,10 @@ async def test_webhost_baseline():
         },
     }  # fmt: skip
 
+    requested: list[str] = []
+
     async def handler(request: web.Request) -> web.Response:
+        requested.append(request.path)
         return web.json_response(responses[request.path])
 
     app = web.Application()
@@ -98,7 +101,12 @@ async def test_webhost_baseline():
     async with TestServer(app) as server, aiohttp.ClientSession() as session:
         room = WebhostRoom(str(server.make_url("")).rstrip("/"), "room")
         baseline = await webhost_baseline(WebhostClient(session), room, team=0)
-    assert baseline == Baseline({1: {5, 6}}, {1: 10}, {1: datetime(2026, 10, 4, 19, 0, tzinfo=UTC)})
+        assert baseline == Baseline({1: {5, 6}}, {1: 10}, {1: datetime(2026, 10, 4, 19, 0, tzinfo=UTC)})
+
+        # Totals never change: the static tracker is only read once.
+        requested.clear()
+        assert await webhost_baseline(WebhostClient(session), room, team=0, totals=baseline.totals) == baseline
+        assert "/api/static_tracker/trk" not in requested
 
 
 @requires_ap_server
@@ -142,3 +150,30 @@ async def test_last_activity_follows_check_counts(db):
     await service.snapshot()
     assert service.last_activity > first
     assert (await loaded()).last_activity == service.last_activity
+
+
+async def test_restore_from_saved_slots_and_snapshots(db):
+    room = await RoomRepo(db).create(RoomRecord(guild_id=1, name="R", address="x:1", slot="Alice", created_by=9))
+    history = HistoryRepo(db)
+    state = make_state()
+    progress = Progress(state)
+    progress.apply_baseline(Baseline({1: {1, 2, 3}, 2: {1}}, {1: 10, 2: 4, 3: 5}))
+    state.statuses[2] = ClientStatus.GOAL
+    service = ProgressService(
+        room.id, state, progress, history, fetch_baseline=None, on_change=lambda urgent: None, periodic=False
+    )
+    await service.snapshot()
+    await service.save_slots()
+
+    # After a restart, before any connection: players, goals and counts are known again.
+    restored_state = RoomState("x:1")
+    restored = Progress(restored_state)
+    await restore_progress(history, room.id, restored_state, restored)
+    assert [s.name for s in restored_state.players] == ["Alice", "Bob", "Carol"]
+    assert (restored.done, restored.total) == (4, 19) and restored.reached_goal(2)
+
+    # A live check adds to the restored count; a baseline replaces it.
+    restored.apply(sent(1, 2, 50))
+    assert restored[1].done == 4
+    restored.apply_baseline(Baseline({1: {1, 2, 3, 50}}, {}))
+    assert restored[1].done == 4

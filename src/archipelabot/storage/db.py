@@ -74,6 +74,20 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE room ADD COLUMN hints_message_id INTEGER;
     """,
+    """
+    ALTER TABLE room DROP COLUMN hints_message_id;
+    CREATE TABLE room_slot (
+        room_id     INTEGER NOT NULL REFERENCES room (id) ON DELETE CASCADE,
+        slot        INTEGER NOT NULL,
+        name        TEXT NOT NULL,
+        game        TEXT NOT NULL,
+        alias       TEXT NOT NULL DEFAULT '',
+        is_group    INTEGER NOT NULL DEFAULT 0,
+        total       INTEGER,
+        goal        INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (room_id, slot)
+    );
+    """,
 ]
 
 

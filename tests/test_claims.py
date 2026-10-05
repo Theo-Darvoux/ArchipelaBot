@@ -9,7 +9,7 @@ from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
 from archipelabot.errors import UserError
 from archipelabot.storage.claims import NotifMode
-from archipelabot.ui.panel_buttons import ClaimButton, ClaimPicker
+from archipelabot.ui.panel_buttons import ClaimButton, ClaimPicker, claimed_message
 
 from .ap_server import requires_ap_server
 from .fakes import FakeInteraction, FakeUser, view_text
@@ -73,7 +73,11 @@ async def test_claim_rules(bot, room):
     runtime, thread, guild = room
     interaction = await run_command(bot, "claim", guild, thread, slot="bob")  # case-insensitive
     assert runtime.claims == {2: 77}
+    assert "te mentionnera" in view_text(interaction.replies[0]["view"])
+    await bot.notif_prefs.set(77, NotifMode.OFF)
+    interaction = await run_command(bot, "claim", guild, thread, slot="Bob")
     assert "Tu joues **Bob**" in view_text(interaction.replies[0]["view"])
+    assert "désactivé les notifications" in view_text(interaction.replies[0]["view"])
 
     with pytest.raises(UserError, match="déjà pris par <@77>"):
         await run_command(bot, "claim", guild, thread, user=88, slot="Bob")
@@ -179,6 +183,7 @@ async def test_dm_mode_sends_a_dm_instead(bot, room, ap_server):
             await runtime.notify.flush()
             await asyncio.sleep(0.1)
     assert dms[0].startswith("77: ### 📬 Nouveaux items")
+    assert "message privé" in claimed_message(runtime, 2, 77)
     await runtime.feed.flush()
     assert not any("<@77>" in text for text in thread.texts())
     await finder.close()

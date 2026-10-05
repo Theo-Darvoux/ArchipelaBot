@@ -17,6 +17,17 @@ class LoggedEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedSlot:
+    slot: int
+    name: str
+    game: str
+    alias: str = ""
+    is_group: bool = False
+    total: int | None = None
+    goal: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Snapshot:
     at: datetime
     slot: int
@@ -53,6 +64,30 @@ class HistoryRepo:
             [(room_id, s.at.isoformat(), s.slot, s.checked, s.total) for s in snapshots],
         )
         await self.db.conn.commit()
+
+    async def save_slots(self, room_id: int, slots: list[SavedSlot]) -> None:
+        await self.db.conn.executemany(
+            """
+            INSERT INTO room_slot (room_id, slot, name, game, alias, is_group, total, goal)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (room_id, slot) DO UPDATE SET
+                name = excluded.name, game = excluded.game, alias = excluded.alias, is_group = excluded.is_group,
+                total = coalesce(excluded.total, total), goal = excluded.goal
+            """,
+            [(room_id, s.slot, s.name, s.game, s.alias, s.is_group, s.total, s.goal) for s in slots],
+        )
+        await self.db.conn.commit()
+
+    async def slots(self, room_id: int) -> list[SavedSlot]:
+        async with self.db.conn.execute(
+            "SELECT slot, name, game, alias, is_group, total, goal FROM room_slot WHERE room_id = ? ORDER BY slot",
+            (room_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            SavedSlot(r["slot"], r["name"], r["game"], r["alias"], bool(r["is_group"]), r["total"], bool(r["goal"]))
+            for r in rows
+        ]
 
     async def snapshots(self, room_id: int) -> list[Snapshot]:
         async with self.db.conn.execute(

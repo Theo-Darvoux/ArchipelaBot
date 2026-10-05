@@ -60,8 +60,8 @@ async def test_unknown_slot_is_refused(ap_server):
 async def test_receives_items_chat_and_deaths_from_other_players(ap_server, tmp_path):
     bot = await open_session(ap_server.address, BOT)
     store = DataPackageStore(tmp_path)
-    store.add(await bot.get_data_package(store.missing(bot.room_info.datapackage_checksums)))
-    assert store.missing(bot.room_info.datapackage_checksums) == []
+    await store.add(await bot.get_data_package(await store.missing(bot.room_info.datapackage_checksums)))
+    assert await store.missing(bot.room_info.datapackage_checksums) == []
 
     carol = await open_session(ap_server.address, CAROL)
     location = carol.connected.missing_locations[0]
@@ -83,7 +83,7 @@ async def test_receives_items_chat_and_deaths_from_other_players(ap_server, tmp_
     assert (chat.slot, chat.message) == (3, "salut")
 
     # A fresh store finds everything in the disk cache.
-    assert DataPackageStore(tmp_path).missing(bot.room_info.datapackage_checksums) == []
+    assert await DataPackageStore(tmp_path).missing(bot.room_info.datapackage_checksums) == []
     await carol.close()
     await bot.close()
 

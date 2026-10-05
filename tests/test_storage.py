@@ -6,7 +6,7 @@ from archipelabot.ap.webhost import WebhostRoom
 from archipelabot.storage.claims import ClaimRepo, NotifMode, NotifPrefs
 from archipelabot.storage.db import MIGRATIONS, Database
 from archipelabot.storage.guilds import GuildConfig, GuildRepo
-from archipelabot.storage.history import HistoryRepo, LoggedEvent, Snapshot
+from archipelabot.storage.history import HistoryRepo, LoggedEvent, SavedSlot, Snapshot
 from archipelabot.storage.rooms import RoomRecord, RoomRepo, RoomSettings
 
 
@@ -51,9 +51,15 @@ async def test_room_roundtrip_and_status(db):
     assert loaded == room
     assert [r.id for r in await repo.active()] == [room.id]
 
+    room.password = "secret"
+    await repo.save_password(room)
+    assert (await repo.by_thread(50)).password == "secret"
+    assert await repo.by_thread(49) is None
+
     await repo.set_status(room, "finished")
     assert await repo.active() == []
-    assert (await repo.get(room.id)).status == "finished"
+    loaded = await repo.get(room.id)
+    assert loaded.status == "finished" and loaded.ended_at == room.ended_at is not None
 
 
 def test_room_settings_item_filter():
@@ -111,15 +117,22 @@ async def test_history(db):
     await history.snapshot(room.id, snaps)
     assert await history.snapshots(room.id) == snaps
 
+    await history.save_slots(room.id, [SavedSlot(1, "Alice", "OoT", total=10), SavedSlot(2, "Bob", "SM")])
+    await history.save_slots(room.id, [SavedSlot(1, "Alice", "OoT", alias="Ali", goal=True)])
+    assert await history.slots(room.id) == [
+        SavedSlot(1, "Alice", "OoT", alias="Ali", total=10, goal=True),  # a known total is kept
+        SavedSlot(2, "Bob", "SM"),
+    ]
 
-def test_data_packages_of_two_versions_of_a_game_coexist():
+
+async def test_data_packages_of_two_versions_of_a_game_coexist():
     def wire(checksum, item):
         return {"checksum": checksum, "item_name_to_id": {item: 1}, "location_name_to_id": {"Lieu": 2}}
 
     store = DataPackageStore(None)
-    store.add({"Game": wire("v1", "Old sword")})
-    assert store.missing({"Game": "v1"}) == [] and store.missing({"Game": "v2"}) == ["Game"]
-    store.add({"Game": wire("v2", "New sword")})
+    await store.add({"Game": wire("v1", "Old sword")})
+    assert await store.missing({"Game": "v1"}) == [] and await store.missing({"Game": "v2"}) == ["Game"]
+    await store.add({"Game": wire("v2", "New sword")})
     assert store.item_name("Game", "v1", 1) == "Old sword"
     assert store.item_name("Game", "v2", 1) == "New sword"
     assert store.item_name("Game", "unknown", 1) == "New sword"  # best effort

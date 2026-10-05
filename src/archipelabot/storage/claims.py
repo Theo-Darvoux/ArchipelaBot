@@ -17,6 +17,10 @@ class ClaimRepo:
         async with self.db.conn.execute("SELECT slot, user_id FROM claim WHERE room_id = ?", (room_id,)) as cur:
             return {row["slot"]: row["user_id"] for row in await cur.fetchall()}
 
+    async def names(self, room_id: int) -> dict[int, str]:
+        async with self.db.conn.execute("SELECT slot, slot_name FROM claim WHERE room_id = ?", (room_id,)) as cur:
+            return {row["slot"]: row["slot_name"] for row in await cur.fetchall()}
+
     async def set(self, room_id: int, slot: int, slot_name: str, user_id: int) -> None:
         await self.db.conn.execute(
             """

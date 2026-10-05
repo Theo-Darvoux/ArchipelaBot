@@ -8,12 +8,14 @@ import pytest
 
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
+from archipelabot.ap.webhost import RoomNotFound, WebhostRoom
 from archipelabot.core import events as ev
 from archipelabot.errors import UserError
 from archipelabot.storage.guilds import GuildConfig
+from archipelabot.storage.rooms import RoomRecord
 from archipelabot.ui.rooms import RoomManager
 
-from .ap_server import requires_ap_server
+from .ap_server import APServer, requires_ap_server
 from .fakes import FakeForum, FakeGuild, FakeInteraction, FakeUser, view_text
 
 pytestmark = requires_ap_server
@@ -263,3 +265,111 @@ async def test_stop_buttons_only_work_once(bot, discord_env, ap_server):
     assert second.response.deferred and not second.edited
     assert all(b.disabled for b in view.walk_children() if isinstance(b, discord.ui.Button))
     assert sum("Récap" in text or "Partie terminée" in text for text in thread.texts()) == 1
+
+
+async def test_events_while_the_post_is_created_are_posted(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    carol = await open_session(ap_server.address, CAROL)
+    create_thread = forum.create_thread
+
+    async def slow_create_thread(**kwargs):
+        await carol.send(p.say_packet("je suis déjà là"))
+        await asyncio.sleep(0.5)
+        return await create_thread(**kwargs)
+
+    forum.create_thread = slow_create_thread
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    [thread] = forum.threads
+    runtime = bot.rooms.by_thread(thread.id)
+
+    async def posted():
+        await runtime.feed.flush()
+        return any("je suis déjà là" in t for t in thread.texts())
+
+    async with asyncio.timeout(10):
+        while not await posted():
+            await asyncio.sleep(0.1)
+    await carol.close()
+
+
+async def test_reconnect_with_a_new_password(bot, discord_env):
+    guild, forum = discord_env
+    server = APServer(password="vieux")
+    try:
+        await track(bot, guild, lien=server.address, slot="Alice", mot_de_passe="vieux")
+        [thread] = forum.threads
+        runtime = bot.rooms.by_thread(thread.id)
+        await wait_until(lambda: runtime.progress.total is not None)
+        server.stop()
+        server = APServer(password="neuf", port=server.port)
+        await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.FAILED, wait=20)
+        await runtime.feed.flush()
+        assert any("`/track reconnect`" in t for t in thread.texts())
+
+        cog = bot.get_cog("track")
+        with pytest.raises(UserError, match="Seule la personne"):
+            await cog.reconnect.callback(
+                cog, FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(id=5)), mot_de_passe="neuf"
+            )
+        interaction = FakeInteraction(guild=guild, channel_id=thread.id)
+        await cog.reconnect.callback(cog, interaction, mot_de_passe="neuf")
+        assert "Reconnexion lancée" in view_text(interaction.followup.sent[0]["view"])
+        await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
+        assert (await bot.rooms.repo.get(runtime.record.id)).password == "neuf"
+    finally:
+        server.stop()
+
+
+async def test_rooms_down_for_a_week_are_abandoned(bot, discord_env):
+    guild, forum = discord_env
+    server = APServer()
+    await track(bot, guild, lien=server.address, slot="Alice")
+    [thread] = forum.threads
+    runtime = bot.rooms.by_thread(thread.id)
+    await wait_until(lambda: runtime.progress.total is not None)  # first sync, which saves a snapshot
+    runtime.progress_service.last_activity = datetime.now(UTC) - timedelta(days=8)
+
+    bot.rooms.check_abandoned(runtime)
+    await asyncio.sleep(0.2)
+    assert bot.rooms.get(runtime.record.id) is runtime  # still connected: players may come back
+
+    server.stop()
+    await wait_until(lambda: runtime.tracker.state.connection != ev.ConnectionState.CONNECTED)
+    bot.rooms.check_abandoned(runtime)
+    await wait_until(lambda: bot.rooms.get(runtime.record.id) is None)
+    assert any("Aucune activité dans la room depuis 7 jours" in text for text in thread.texts())
+
+
+async def test_a_short_404_of_the_site_does_not_stop_the_room(bot, discord_env, monkeypatch):
+    guild, _ = discord_env
+    responses: list = []
+
+    class Site:
+        async def current_address(self, _room):
+            answer = responses.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    monkeypatch.setattr(type(bot), "webhost", property(lambda _self: Site()))
+    monkeypatch.setattr("archipelabot.ui.rooms.GONE_AFTER", timedelta(milliseconds=200))
+    abandoned: list[str] = []
+    monkeypatch.setattr(bot.rooms, "_abandon_soon", lambda _room_id, reason: abandoned.append(reason))
+    record = RoomRecord(
+        guild_id=guild.id, name="R", address="x:1", slot="Alice", created_by=1, id=1,
+        webhost=WebhostRoom("https://archipelago.gg", "abc"),
+    )  # fmt: skip
+    resolve = bot.rooms.build_tracker(record).resolve_address
+
+    responses += [RoomNotFound("introuvable"), "x:2", RoomNotFound("introuvable"), RoomNotFound("introuvable")]
+    for expected in (RoomNotFound, "x:2", RoomNotFound):
+        if expected is RoomNotFound:
+            with pytest.raises(RoomNotFound):
+                await resolve()
+        else:
+            assert await resolve() == expected
+    assert not abandoned
+    await asyncio.sleep(0.25)
+    with pytest.raises(RoomNotFound):
+        await resolve()
+    assert abandoned == ["La room n'existe plus sur archipelago.gg"]

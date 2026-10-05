@@ -3,6 +3,7 @@ services:
     build: .
     image: archipelabot
     restart: unless-stopped
+    stop_grace_period: 30s
     env_file: .env
     volumes:
       - ./data:/data

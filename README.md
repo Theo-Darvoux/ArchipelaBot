@@ -26,11 +26,12 @@ salon forum, avec un panneau de status, le fil des items, les événements impor
 | `/config forum` · `recap` · `voir` | Configuration du serveur (permission *Gérer le serveur*) |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum |
 | `/track reglages` | Dans le post d'une room : choisir ce qui est affiché |
+| `/track reconnect [mot_de_passe]` | Dans le post d'une room : relancer la connexion tout de suite (par exemple après un refus du serveur), en changeant le mot de passe si besoin |
 | `/track stop` | Dans le post d'une room : arrêter le suivi, avec ou sans récap |
 | `/claim slot:<joueur>` · `/unclaim` | Dans le post d'une room : dire quel slot tu joues (ou bouton « Je joue » du panneau) |
 | `/status [joueur]` | Dans le post d'une room : progression détaillée d'un joueur (par défaut, le tien) |
 | `/hints [joueur]` | Dans le post d'une room : tes hints (ou ceux d'un joueur), visibles seulement par toi |
-| `/recap` | Dans le post d'une room : publier le récap (podium, chiffres, graphique) |
+| `/recap` | Dans le post d'une room : publier le récap (podium, chiffres, graphique), même une fois le suivi arrêté. Réservé à qui a lancé le suivi et aux modérateurs |
 | `/notifs` | Être prévenu des items de progression reçus : mention dans le post, DM, ou rien. Seulement quand tu n'es pas en jeu (depuis au moins 2 minutes), et une seule fois par absence |
 
 ## Déploiement (VPS avec Docker)

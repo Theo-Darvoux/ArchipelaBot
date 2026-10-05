@@ -53,7 +53,7 @@ class ClaimCog(commands.Cog, name="claim"):
         await runtime.claim(number, user.id, force=moderator)
 
         text = (
-            claimed_message(runtime, number)
+            claimed_message(runtime, number, user.id)
             if user == interaction.user
             else (f"**{md(runtime.tracker.state.name(number))}** est maintenant attribué à {user.mention}.")
         )

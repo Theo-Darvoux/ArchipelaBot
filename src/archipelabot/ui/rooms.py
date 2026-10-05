@@ -5,7 +5,7 @@ import contextlib
 import io
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -14,11 +14,11 @@ import discord
 from discord import ui
 
 from ..ap.client import ConnectOptions
-from ..ap.webhost import RoomNotFound
+from ..ap.webhost import RoomNotFound, WebhostError
 from ..core import events as ev
 from ..core.chat import ChatRelay
-from ..core.progress import Progress, direct_baseline, webhost_baseline
-from ..core.room import AddressResolver, RoomTracker, Waker
+from ..core.progress import Baseline, Progress, direct_baseline, webhost_baseline
+from ..core.room import AddressResolver, RoomState, RoomTracker, SlotInfo, Waker
 from ..errors import UserError
 from ..recap.chart import render_chart
 from ..recap.stats import Recap, build_recap
@@ -36,7 +36,7 @@ from .services.feed import FeedMessage, FeedService
 from .services.notify import NotifyService
 from .services.panel import PanelService
 from .services.presence import Presence
-from .services.progress import BaselineFetcher, ProgressService
+from .services.progress import BaselineFetcher, ProgressService, restore_progress
 from .views import SettingsView
 
 if TYPE_CHECKING:
@@ -47,6 +47,25 @@ log = logging.getLogger(__name__)
 BOT_TAGS = ("TextOnly", "DeathLink")
 KEEP_AWAKE = timedelta(hours=24)
 ABANDONED_AFTER = timedelta(days=7)
+GONE_AFTER = timedelta(hours=1)
+WATCH_INTERVAL = 3600.0
+DOWN = frozenset(
+    {
+        ev.ConnectionState.RECONNECTING,
+        ev.ConnectionState.ASLEEP,
+        ev.ConnectionState.UNREACHABLE,
+        ev.ConnectionState.FAILED,
+    }
+)
+CONNECTION_TAGS = {
+    ev.ConnectionState.CONNECTED: RoomTag.ACTIVE,
+    ev.ConnectionState.ASLEEP: RoomTag.ASLEEP,
+    ev.ConnectionState.UNREACHABLE: RoomTag.ASLEEP,
+}
+
+
+def can_manage(record: RoomRecord, user_id: int, permissions: discord.Permissions) -> bool:
+    return user_id == record.created_by or permissions.manage_threads
 
 
 class ThreadSink:
@@ -185,7 +204,7 @@ class RoomRuntime:
         return [kind(self.record.id) for kind in kinds] if self.active else None
 
     def can_manage(self, user_id: int, permissions: discord.Permissions) -> bool:
-        return user_id == self.record.created_by or permissions.manage_threads
+        return can_manage(self.record, user_id, permissions)
 
     def settings_view(self) -> SettingsView:
         async def save(settings) -> None:
@@ -245,8 +264,7 @@ class RoomRuntime:
         if event.state == ev.ConnectionState.CONNECTED and event.address != self.record.address:
             self.record.address = event.address
             await self.repo.save_address(self.record)
-        tag = {ev.ConnectionState.CONNECTED: RoomTag.ACTIVE, ev.ConnectionState.ASLEEP: RoomTag.ASLEEP}.get(event.state)
-        if tag:
+        if tag := CONNECTION_TAGS.get(event.state):
             try:
                 await self.sink.set_tag(tag)
             except discord.HTTPException:
@@ -261,6 +279,7 @@ class RoomManager:
         self.history = HistoryRepo(bot.db)
         self._stopping: dict[int, asyncio.Task[None]] = {}
         self._rooms: dict[int, RoomRuntime] = {}
+        self.watch_interval = WATCH_INTERVAL
 
     def get(self, room_id: int) -> RoomRuntime | None:
         return self._rooms.get(room_id)
@@ -283,20 +302,24 @@ class RoomManager:
         resolve: AddressResolver | None = None
         wake: Waker | None = None
         if webhost := record.webhost:
+            gone_since: datetime | None = None
 
             async def resolve_webhost() -> str | None:
+                nonlocal gone_since
                 try:
-                    return await self.bot.webhost.current_address(webhost)
+                    address = await self.bot.webhost.current_address(webhost)
                 except RoomNotFound:
-                    self._abandon_soon(record.id, f"La room n'existe plus sur {webhost.host}")
+                    now = datetime.now(UTC)
+                    gone_since = gone_since or now
+                    if now - gone_since >= GONE_AFTER:  # not a short outage of the site
+                        self._abandon_soon(record.id, f"La room n'existe plus sur {webhost.host}")
                     raise
+                gone_since = None
+                return address
 
             async def wake_webhost() -> None:
                 runtime = self._rooms.get(record.id)
-                if runtime is not None and runtime.abandoned():
-                    days = ABANDONED_AFTER.days
-                    self._abandon_soon(record.id, f"Aucune activité dans la room depuis {days} jours")
-                elif runtime is None or runtime.worth_waking():
+                if runtime is None or runtime.worth_waking():
                     await self.bot.webhost.wake(webhost)
 
             resolve, wake = resolve_webhost, wake_webhost
@@ -327,6 +350,7 @@ class RoomManager:
             asyncio.create_task(runtime.notify.run(), name=f"notify {record.id}"),
             asyncio.create_task(runtime.panel.run(), name=f"panel {record.id}"),
             asyncio.create_task(runtime.chat.run(), name=f"chat {record.id}"),
+            asyncio.create_task(self._watch(runtime), name=f"watch {record.id}"),
         ]
         try:
             await runtime.sink.pin_panel()
@@ -338,8 +362,37 @@ class RoomManager:
     def _baseline_fetcher(self, record: RoomRecord, tracker: RoomTracker) -> BaselineFetcher:
         state = tracker.state
         if webhost := record.webhost:
-            return lambda: webhost_baseline(self.bot.webhost, webhost, state.team)
+            totals: dict[int, int] = {}
+
+            async def fetch() -> Baseline:
+                baseline = await webhost_baseline(self.bot.webhost, webhost, state.team, totals)
+                totals.update(baseline.totals)
+                return baseline
+
+            return fetch
         return lambda: direct_baseline(state.address, record.password, state)
+
+    async def _watch(self, runtime: RoomRuntime) -> None:
+        while True:
+            await asyncio.sleep(self.watch_interval)
+            self.check_abandoned(runtime)
+
+    def check_abandoned(self, runtime: RoomRuntime) -> None:
+        """Stop following a room that has been down and idle for too long."""
+        if runtime.tracker.state.connection in DOWN and runtime.abandoned():
+            self._abandon_soon(runtime.record.id, f"Aucune activité dans la room depuis {ABANDONED_AFTER.days} jours")
+
+    async def reconnect(self, runtime: RoomRuntime, password: str | None = None) -> None:
+        if password is not None:
+            runtime.record.password = runtime.chat.password = password
+            await self.repo.save_password(runtime.record)
+            runtime.tracker.options = replace(runtime.tracker.options, password=password)
+        if webhost := runtime.record.webhost:
+            try:
+                await self.bot.webhost.wake(webhost)
+            except WebhostError:
+                log.warning("Could not wake room %s", runtime.record.id, exc_info=True)
+        await runtime.tracker.reconnect()
 
     async def auto_claim(self, runtime: RoomRuntime) -> int:
         """Give slots to whoever played them in this guild's earlier rooms. Returns how many were claimed."""
@@ -361,7 +414,7 @@ class RoomManager:
     async def _finish(self, runtime: RoomRuntime) -> None:
         await runtime.feed.flush()
         try:
-            await self.publish_recap(runtime)
+            await self.publish_recap(runtime, announce=True)
         except Exception:
             log.exception("Could not publish the recap of room %s", runtime.record.id)
         await self.stop(runtime, "finished")
@@ -387,11 +440,30 @@ class RoomManager:
         if runtime := self.by_thread(thread_id):
             self._later(runtime.record.id, self._forget)
 
-    async def publish_recap(self, runtime: RoomRuntime) -> None:
-        """Post the recap in the room's post, and in the guild's recap channel if there is one."""
+    async def publish_recap(self, runtime: RoomRuntime, *, announce: bool) -> None:
+        """Post the recap in the room's post, and with `announce` in the guild's recap channel if there is one."""
         recap = await runtime.build_recap()
+        await self._post_recap(runtime.sink, runtime.tracker.state, recap, announce=announce)
+
+    async def publish_stopped_recap(self, record: RoomRecord) -> None:
+        """The recap of a room no longer tracked, from what the bot saved, in its post only."""
+        assert record.id is not None
+        state = RoomState(record.address)
+        progress = Progress(state)
+        events, snapshots = await restore_progress(self.history, record.id, state, progress)
+        if not state.slots:  # stopped before the bot saved its players
+            names = await self.claim_repo.names(record.id)
+            state.slots = {
+                slot: SlotInfo(slot, names.get(slot, f"Joueur {slot}"), "?") for slot in {s.slot for s in snapshots}
+            }
+        if not state.players:
+            raise UserError("Le bot n'a rien enregistré sur cette room : pas de récap possible.")
+        ended = record.ended_at or datetime.now(UTC)
+        recap = build_recap(record.name, record.created_at, ended, state, progress, events, snapshots)
+        await self._post_recap(ThreadSink(self.bot, record), state, recap, announce=False)
+
+    async def _post_recap(self, sink: ThreadSink, state: RoomState, recap: Recap, *, announce: bool) -> None:
         tz = ZoneInfo(self.bot.settings.timezone)
-        state = runtime.tracker.state
         chart = await asyncio.to_thread(render_chart, recap, state.name, tz) if recap.series else None
 
         async def send(channel: discord.abc.Messageable, thread_url: str | None) -> None:
@@ -399,13 +471,13 @@ class RoomManager:
             files = [discord.File(io.BytesIO(chart), CHART_FILENAME)] if chart else []
             await channel.send(view=view, files=files)
 
-        await send(await runtime.sink.thread(), None)
-        config = await self.bot.guild_configs.get(runtime.record.guild_id)
-        if config.recap_channel_id:
+        await send(await sink.thread(), None)
+        config = await self.bot.guild_configs.get(sink.record.guild_id)
+        if announce and config.recap_channel_id:
             channel = self.bot.get_channel(config.recap_channel_id) or await self.bot.fetch_channel(
                 config.recap_channel_id
             )
-            await send(channel, runtime.sink.jump_url)
+            await send(channel, sink.jump_url)
 
     async def restore(self) -> None:
         """Resume every active room after a restart; they reconnect in the background."""
@@ -433,8 +505,7 @@ class RoomManager:
             log.warning("Could not finalize the post of room %s", runtime.record.id, exc_info=True)
 
     async def shutdown(self) -> None:
-        for runtime in list(self._rooms.values()):
-            await self._detach(runtime)
+        await asyncio.gather(*(self._detach(runtime) for runtime in list(self._rooms.values())))
 
     async def _detach(self, runtime: RoomRuntime) -> None:
         self._rooms.pop(runtime.record.id, None)

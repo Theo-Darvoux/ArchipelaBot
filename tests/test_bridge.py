@@ -21,6 +21,9 @@ def test_chat_text():
     assert chat_text("", ["https://cdn/x.png"]) == "https://cdn/x.png"
     assert chat_text("  ") is None
     assert len(chat_text("a" * 5000)) == 600
+    # The server refuses messages that aren't printable: joiners are dropped, odd spaces become spaces.
+    assert chat_text("bof 🤷\u200d♂️\tok\xa0?") == "bof 🤷♂️ ok ?"
+    assert chat_text("\u200d") is None
     assert signed("Théo", "salut") == "[Discord] Théo: salut"
 
 
@@ -99,6 +102,11 @@ async def test_discord_messages_reach_the_game_and_are_not_echoed(bot, room):
     assert (chat.slot, chat.message) == (2, "c'est Bob") and message.reactions == []
     assert runtime.tracker.state.relay_slots == {2}
     assert not runtime.tracker.state.is_online(2)  # the relay connection isn't Bob playing
+
+    # Emoji sequences used to be refused by the server, without any sign of it on Discord.
+    message = await say_on_discord(bot, thread, "❤️\u200d🔥 gg")
+    chat = await next_chat(carol)
+    assert (chat.slot, chat.message) == (2, "❤️🔥 gg") and message.reactions == []
 
     # The game echoes the bot's own messages: they must not come back to Discord.
     await carol.send(p.say_packet("salut Discord"))

@@ -9,6 +9,7 @@ from ..components import Tone, notice
 from ..panel_buttons import hints_for
 from ..render.hints import player_hints_view
 from ..render.status import player_status_view
+from ..rooms import can_manage
 from ..types import Interaction
 
 if TYPE_CHECKING:
@@ -64,10 +65,16 @@ class StatusCog(commands.Cog, name="status"):
     @app_commands.guild_only()
     async def recap(self, interaction: Interaction) -> None:
         runtime = self.bot.rooms.by_thread(interaction.channel_id)
-        if runtime is None:
-            raise UserError("Utilise cette commande dans le post d'une room suivie.")
+        record = runtime.record if runtime else await self.bot.rooms.repo.by_thread(interaction.channel_id)
+        if record is None:
+            raise UserError("Utilise cette commande dans le post d'une room.")
+        if not can_manage(record, interaction.user.id, interaction.permissions):
+            raise UserError("Seule la personne qui a lancé le suivi (ou un modérateur) peut publier le récap.")
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.bot.rooms.publish_recap(runtime)
+        if runtime:
+            await self.bot.rooms.publish_recap(runtime, announce=False)
+        else:
+            await self.bot.rooms.publish_stopped_recap(record)
         await interaction.followup.send(view=notice("Récap publié.", Tone.SUCCESS), ephemeral=True)
 
 

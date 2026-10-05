@@ -1,5 +1,6 @@
 """Item and location names, cached on disk by data package checksum."""
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -41,7 +42,7 @@ class DataPackageStore:
     def _store(self, game: str, data: GameData) -> None:
         self._games[game, data.checksum] = self._latest[game] = data
 
-    def missing(self, checksums: dict[str, str]) -> list[str]:
+    async def missing(self, checksums: dict[str, str]) -> list[str]:
         """Games whose data isn't loaded at the right checksum, after trying the disk cache."""
         missing = []
         for game, checksum in checksums.items():
@@ -50,19 +51,18 @@ class DataPackageStore:
             path = self._path(game, checksum)
             if path and path.exists():
                 try:
-                    self._store(game, GameData.from_wire(json.loads(path.read_text("utf-8"))))
+                    self._store(game, await asyncio.to_thread(_load, path))
                     continue
                 except (ValueError, KeyError):
                     log.warning("Corrupted data package cache %s, refetching", path)
             missing.append(game)
         return missing
 
-    def add(self, games: dict[str, dict[str, Any]]) -> None:
+    async def add(self, games: dict[str, dict[str, Any]]) -> None:
         for game, raw in games.items():
             self._store(game, GameData.from_wire(raw))
             if path := self._path(game, raw.get("checksum", "")):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps(raw), "utf-8")
+                await asyncio.to_thread(_save, path, raw)
 
     def _data(self, game: str, checksum: str) -> GameData | None:
         return self._games.get((game, checksum)) or self._latest.get(game)
@@ -74,3 +74,12 @@ class DataPackageStore:
     def location_name(self, game: str, checksum: str, location_id: int) -> str:
         data = self._data(game, checksum)
         return (data and data.locations.get(location_id)) or f"Lieu #{location_id}"
+
+
+def _load(path: Path) -> GameData:
+    return GameData.from_wire(json.loads(path.read_text("utf-8")))
+
+
+def _save(path: Path, raw: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw), "utf-8")

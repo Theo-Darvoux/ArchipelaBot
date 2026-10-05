@@ -119,6 +119,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         record.panel_message_id = created.message.id
         await self.bot.rooms.repo.create(record)
         runtime = await self.bot.rooms.attach(record, tracker)
+        tracker.listen()
         recognised = await self.bot.rooms.auto_claim(runtime)
         runtime.panel.request_update(urgent=True)
 
@@ -142,7 +143,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
                     continue
                 tracker.state.address = record.address = address
             try:
-                await tracker.start()
+                await tracker.start(listen=False)
                 return tracker
             except APRefused as e:
                 reasons = [REFUSAL_MESSAGES.get(err, err) for err in e.errors]
@@ -177,7 +178,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             if stopped_already():
                 return f"{E.stopped} Ce suivi est déjà arrêté."
             try:
-                await self.bot.rooms.publish_recap(runtime)
+                await self.bot.rooms.publish_recap(runtime, announce=True)
                 text = f"{E.stopped} Suivi arrêté, récap publié."
             except Exception:
                 log.exception("Could not publish the recap of room %s", runtime.record.id)
@@ -200,6 +201,16 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             ],
         )
         await interaction.response.send_message(view=view, ephemeral=True)
+
+    @app_commands.command(name="reconnect", description="Relancer tout de suite la connexion de cette room")
+    @app_commands.describe(mot_de_passe="Nouveau mot de passe du serveur, s'il a changé")
+    async def reconnect(self, interaction: Interaction, mot_de_passe: str | None = None) -> None:
+        runtime = self._room_here(interaction)
+        self._check_manager(interaction, runtime)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.bot.rooms.reconnect(runtime, mot_de_passe)
+        text = f"{E.reconnecting} Reconnexion lancée : le panneau de la room affiche le résultat."
+        await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
 
     @app_commands.command(name="reglages", description="Choisir ce qui est affiché dans le fil de cette room")
     async def settings(self, interaction: Interaction) -> None:

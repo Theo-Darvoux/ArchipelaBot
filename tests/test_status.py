@@ -7,6 +7,7 @@ import pytest
 
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
+from archipelabot.core import events as ev
 from archipelabot.errors import UserError
 from archipelabot.ui.panel_buttons import SettingsButton
 from archipelabot.ui.rooms import RoomManager
@@ -88,6 +89,39 @@ async def test_deaths_and_goals_survive_a_restart(bot, room, ap_server):
     assert restored.progress[3].deaths == 1
     assert restored.progress[3].goal_at == goal_at
     assert [s.slot for s in await bot.rooms.history.snapshots(restored.record.id)] == [1, 2, 3]
+
+
+async def test_direct_rooms_resync_after_a_connection_loss_but_not_a_restart(bot, room, ap_server):
+    runtime, thread, _ = room
+    carol = await open_session(ap_server.address, CAROL)
+    await carol.send(p.location_checks_packet(carol.connected.missing_locations[:2]))
+    await wait_until(lambda: runtime.progress[3].done == 2)
+    total = runtime.progress.total
+
+    await bot.rooms.shutdown()
+    bot.rooms = RoomManager(bot)
+    await bot.rooms.restore()
+    restored = bot.rooms.by_thread(thread.id)
+    syncs = 0
+    fetch = restored.progress_service.fetch_baseline
+
+    async def counting_fetch():
+        nonlocal syncs
+        syncs += 1
+        return await fetch()
+
+    restored.progress_service.fetch_baseline = counting_fetch
+    # Known from the database before the room is even reached, without one connection per player.
+    assert (restored.progress[3].done, restored.progress.total) == (2, total)
+    await wait_until(lambda: restored.tracker.state.connection == ev.ConnectionState.CONNECTED)
+    await asyncio.sleep(0.5)
+    assert syncs == 0
+
+    # Checks made while the bot was cut off are only known by asking again.
+    await restored.tracker.reconnect()
+    await carol.send(p.location_checks_packet(carol.connected.missing_locations[2:3]))
+    await wait_until(lambda: syncs == 1 and restored.progress[3].done == 3)
+    await carol.close()
 
 
 async def test_settings_button_permissions(bot, room):

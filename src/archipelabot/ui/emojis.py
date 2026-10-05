@@ -24,8 +24,6 @@ FALLBACKS: dict[str, str] = {
     "online": "🟢",
     "offline": "⚫",
     "goal": "🏆",
-    "bar_on": "▰",
-    "bar_off": "▱",
     **{f"ring_{i}": "◯◔◔◑◑◕◕◕●"[i] for i in range(RING_STEPS + 1)},
     "release": "📤",
     "collect": "📥",
@@ -34,8 +32,6 @@ FALLBACKS: dict[str, str] = {
     "death": "💀",
     "hint": "💡",
     "chat": "💬",
-    "priority": "⭐",
-    "no_priority": "🔽",
     "avoid": "⛔",
     "connecting": "⏳",
     "reconnecting": "🟠",
@@ -47,9 +43,7 @@ FALLBACKS: dict[str, str] = {
     "notif_thread": "🔔",
     "notif_dm": "📬",
     "notif_off": "🔕",
-    "success": "✅",
     "error": "❌",
-    "warning": "⚠️",
     "info": "\N{INFORMATION SOURCE}\N{VARIATION SELECTOR-16}",
 }
 

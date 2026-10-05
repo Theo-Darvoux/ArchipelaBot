@@ -26,8 +26,10 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
         f"{cmd('hints')} : tes hints, visibles seulement par toi\n"
         f"{cmd('claim')} · {cmd('unclaim')} : indiquer ou libérer ton slot\n"
         f"{cmd('track reglages')} : choisir ce qui s'affiche dans le fil\n"
-        f"{cmd('recap')} : publier le récap (podium, chiffres, graphique)\n"
-        f"{cmd('track stop')} : arrêter le suivi"
+        f"{cmd('track reconnect')} : relancer la connexion (ou changer le mot de passe)\n"
+        f"{cmd('recap')} : publier le récap (podium, chiffres, graphique), même après l'arrêt\n"
+        f"{cmd('track stop')} : arrêter le suivi\n"
+        "-# Réglages, reconnexion, récap et arrêt : la personne qui a lancé le suivi ou un modérateur."
     )
     notifs = (
         f"### {E.notif_thread} Notifications\n"

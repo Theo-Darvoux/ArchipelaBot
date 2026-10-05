@@ -2,9 +2,9 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections import defaultdict
 from collections.abc import Callable
 
-from ..ap import protocol as p
 from ..ap.client import APSession, ConnectOptions, open_session
 from .room import RoomTracker
 
@@ -31,19 +31,18 @@ class ChatRelay:
         self._sessions: dict[int, APSession] = {}
         self._drains: dict[int, asyncio.Task[None]] = {}
         self._last_used: dict[int, float] = {}
-        self._lock = asyncio.Lock()
+        self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def say(self, slot: int, text: str) -> None:
         if slot == self.tracker.state.own_slot:
             await self.tracker.say(text)
             return
         session = await self._session(slot)
-        self.tracker.expect_echo(slot, text)
-        await session.send(p.say_packet(text))
+        await self.tracker.send_chat(session, slot, text)
         self._last_used[slot] = self.clock()
 
     async def _session(self, slot: int) -> APSession:
-        async with self._lock:
+        async with self._locks[slot]:
             session = self._sessions.get(slot)
             if session is not None and not session.closed:
                 return session
@@ -53,9 +52,10 @@ class ChatRelay:
                 tags=("TextOnly", "NoText"),
                 uuid=f"archipelabot-chat-{slot}",
             )
+            online = self.tracker.state.is_online(slot)  # before our own connection marks the slot connected
             session = await open_session(self.tracker.state.address, options)
             self._sessions[slot] = session
-            self.tracker.state.share(slot)
+            self.tracker.state.share(slot, online)
             self._drains[slot] = asyncio.create_task(self._drain(slot, session), name=f"chat relay {slot}")
             log.info("Opened a chat connection as %s", options.slot)
             return session

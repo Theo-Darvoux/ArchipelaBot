@@ -7,6 +7,7 @@ import discord
 from discord import ui
 
 from ..errors import UserError
+from ..storage.claims import NotifMode
 from .components import Tone, notice
 from .emojis import E
 from .render.hints import all_hints_view, player_hints_view
@@ -18,15 +19,18 @@ if TYPE_CHECKING:
 
 MAX_OPTIONS = 25  # Discord's limit for a select menu
 
+NOTIF_NOTES = {
+    NotifMode.THREAD: "-# Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot te mentionnera "
+    "dans le post de la room, une fois par absence. `/notifs` pour recevoir ça en DM, ou plus du tout.",
+    NotifMode.DM: "-# Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot t'enverra un message "
+    "privé, une fois par absence. `/notifs` pour changer.",
+    NotifMode.OFF: "-# Tu as désactivé les notifications d'items. `/notifs` pour les réactiver.",
+}
 
-def claimed_message(runtime: "RoomRuntime", slot: int) -> str:
+
+def claimed_message(runtime: "RoomRuntime", slot: int, user_id: int) -> str:
     info = runtime.tracker.state.slots[slot]
-    return (
-        f"Tu joues **{md(info.display)}** · *{md(info.game)}*.\n"
-        "-# Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot te mentionnera "
-        "dans le post de la room, une fois par absence. "
-        "`/notifs` pour recevoir ça en DM, ou plus du tout."
-    )
+    return f"Tu joues **{md(info.display)}** · *{md(info.game)}*.\n{NOTIF_NOTES[runtime.prefs.mode(user_id)]}"
 
 
 class ClaimPicker(ui.LayoutView):
@@ -68,7 +72,8 @@ class ClaimPicker(ui.LayoutView):
         except UserError as e:
             await interaction.response.edit_message(view=notice(str(e), Tone.ERROR))
             return
-        await interaction.response.edit_message(view=notice(claimed_message(self.runtime, slot), Tone.SUCCESS))
+        text = claimed_message(self.runtime, slot, interaction.user.id)
+        await interaction.response.edit_message(view=notice(text, Tone.SUCCESS))
 
 
 class ClaimButton(ui.DynamicItem[ui.Button], template=r"archipelabot:claim:(?P<room>\d+)"):

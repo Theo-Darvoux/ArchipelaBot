@@ -51,11 +51,9 @@ type FeedOutput = Line | Card
 
 
 def feed_view(lines: list[str]) -> ui.LayoutView:
-    """Several feed lines in one message, with a divider between each."""
+    """Several feed lines in one message."""
     view = ui.LayoutView()
-    for i, line in enumerate(lines):
-        if i:
-            view.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+    for line in lines:
         view.add_item(ui.TextDisplay(line))
     return view
 

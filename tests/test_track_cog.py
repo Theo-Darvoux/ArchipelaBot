@@ -56,6 +56,7 @@ async def test_track_creates_post_and_posts_items(bot, discord_env, ap_server):
     [thread] = forum.threads
     assert thread.name == "Async test"
     assert [t.name for t in thread.applied_tags] == ["En cours"]
+    assert thread.messages[0].pinned
     panel = view_text(thread.messages[0].view)
     assert "🟢 Connecté" in panel and "· Carol · *ChecksFinder*" in panel
     assert "3 joueurs · 3 jeux" in view_text(interaction.followup.sent[0]["view"])
@@ -147,3 +148,4 @@ async def test_rooms_resume_after_restart(bot, discord_env, ap_server):
     await bot.rooms.restore()
     runtime = bot.rooms.by_thread(forum.threads[0].id)
     await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
+    assert forum.threads[0].pins == 1

@@ -78,6 +78,11 @@ class ThreadSink:
         thread = await self.thread()
         await thread.get_partial_message(self.record.panel_message_id).edit(view=view)
 
+    async def pin_panel(self) -> None:
+        message = await (await self.thread()).fetch_message(self.record.panel_message_id)
+        if not message.pinned:
+            await message.pin(reason="Panel de la room")
+
     async def delete_message(self, message_id: int) -> None:
         await (await self.thread()).get_partial_message(message_id).delete()
 
@@ -306,6 +311,10 @@ class RoomManager:
             await runtime.remove_hint_board()
         except discord.HTTPException:
             log.warning("Could not delete the hint board of room %s", record.id, exc_info=True)
+        try:
+            await runtime.sink.pin_panel()
+        except discord.HTTPException:
+            log.warning("Could not pin the panel of room %s", record.id, exc_info=True)
         self._rooms[record.id] = runtime
         return runtime
 

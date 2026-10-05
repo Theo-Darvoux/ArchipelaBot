@@ -73,10 +73,9 @@ def test_pack_lines_respects_the_limits_and_keeps_mentions():
     assert list(pack_lines([Line("y" * 150)], max_chars=100)) == [FeedMessage(("y" * 99 + "…",))]
 
 
-def test_feed_view_puts_a_divider_between_lines():
-    view = feed_view(["a", "b", "c"])
-    kinds = [type(item).__name__ for item in view.children]
-    assert kinds == ["TextDisplay", "Separator", "TextDisplay", "Separator", "TextDisplay"]
+def test_feed_view_has_one_text_per_line():
+    view = feed_view(["a\n-# lieu", "b", "c"])
+    assert [item.content for item in view.children] == ["a\n-# lieu", "b", "c"]
 
 
 def test_progression_items_ping_their_receiver():

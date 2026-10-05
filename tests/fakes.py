@@ -29,6 +29,7 @@ class FakeMessage:
         self.content = content
         self.view = view
         self.allowed_mentions = allowed_mentions
+        self.pinned = False
 
     @property
     def text(self) -> str:
@@ -42,6 +43,10 @@ class FakeMessage:
         self.view = view if view is not None else self.view
         self.content = content if content is not None else self.content
 
+    async def pin(self, **_kwargs) -> None:
+        self.thread.pins += 1
+        self.pinned = True
+
 
 class FakeThread:
     type = discord.ChannelType.public_thread
@@ -52,6 +57,7 @@ class FakeThread:
         self.parent = parent
         self.applied_tags = list(applied_tags)
         self.messages: list[FakeMessage] = []
+        self.pins = 0
 
     @property
     def mention(self) -> str:
@@ -66,6 +72,9 @@ class FakeThread:
         message = next(m for m in self.messages if m.id == message_id)
         message.thread = self
         return message
+
+    async def fetch_message(self, message_id: int) -> FakeMessage:
+        return self.get_partial_message(message_id)
 
     async def edit(self, *, applied_tags=None, **_kwargs) -> None:
         if applied_tags is not None:

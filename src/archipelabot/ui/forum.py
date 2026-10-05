@@ -22,6 +22,7 @@ REQUIRED_PERMISSIONS = discord.Permissions(
     create_public_threads=True,
     send_messages_in_threads=True,
     manage_threads=True,  # archive / unarchive posts
+    pin_messages=True,  # pin the panel
     embed_links=True,
     attach_files=True,
     add_reactions=True,

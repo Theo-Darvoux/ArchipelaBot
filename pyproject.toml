@@ -1,0 +1,52 @@
+[project]
+name = "archipelabot"
+version = "0.1.0"
+description = "Bot Discord pour suivre les parties Archipelago"
+readme = "README.md"
+authors = [
+    { name = "psders", email = "" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.21",
+    "discord-py>=2.7",
+    "matplotlib>=3.11.2",
+    "pillow>=12.3.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "tzdata>=2026.5",
+    "websockets>=15",
+]
+
+[project.scripts]
+archipelabot = "archipelabot:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["ignore:.count. is passed as positional argument:DeprecationWarning:discord"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ASYNC110"]  # polling a condition is fine in tests

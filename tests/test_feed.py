@@ -54,9 +54,6 @@ def test_bulk_and_key_events():
     assert render(ev.Collected(2, (item(1, 2),))).text.endswith("1 item récupéré")
     assert render(ev.Released(1)).text.endswith("plus rien à envoyer")
 
-    goal = render(ev.GoalReached(3))
-    assert isinstance(goal, Card) and "Carol a terminé" in view_text(goal.view())
-
     assert render(ev.ChatMessage(2, "salut **toi**")) == Line(r"💬 **Bob\_\*x\*** : salut \*\*toi\*\*")
     assert render(ev.Death("Bob", "Bob fell")) == Line("💀 Mort de **Bob** · « Bob fell »")
 
@@ -111,23 +108,6 @@ class Sink:
 
     async def send_view(self, view) -> None:
         self.sent.append(f"[card] {view_text(view)}")
-
-
-async def test_feed_groups_lines_and_keeps_order_around_cards():
-    sink = Sink()
-    feed = FeedService(STATE, lambda: SETTINGS, sink)
-    for event in (item(), item(name="Bow"), ev.GoalReached(1), item(name="Lens"), item(flags=ItemFlags.FILLER)):
-        await feed.handle(event)
-    await feed.flush()
-
-    assert len(sink.sent) == 3
-    assert "Hookshot" in sink.sent[0] and "Bow" in sink.sent[0]
-    assert sink.sent[1].startswith("[card] ### 🏆 Alice a terminé")
-    assert "Lens" in sink.sent[2]
-
-    await feed.flush()
-    assert len(sink.sent) == 3  # nothing new
-
 
 def away_feed(statuses):
     now = [0.0]

@@ -112,8 +112,7 @@ def render_event(event: ev.Event, state: RoomState, settings: RoomSettings, ping
             detail = f"{plural(len(items), 'item récupéré', 'items récupérés')}" if items else "rien à récupérer"
             return [Line(f"{E.collect} **{md(state.name(slot))}** a collect · {detail}")]
         case ev.GoalReached(slot=slot):
-            body = f"Objectif atteint sur *{md(state.game(slot))}*."
-            return [Card(f"{E.trophy} {md(state.name(slot))} a terminé !", body, GOAL_COLOUR)]
+            return [Line(f"{E.trophy} {md(state.name(slot))} a terminé *{md(state.game(slot))}* !")]
         case ev.ChatMessage(slot=slot, text=text) if settings.chat_bridge:
             return [Line(f"{E.chat} **{md(state.name(slot))}** : {md(truncate(text, 1500))}")]
         case ev.Death(source=source, cause=cause) if settings.show_deaths:

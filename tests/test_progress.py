@@ -11,6 +11,9 @@ from archipelabot.ap.webhost import WebhostClient, WebhostRoom
 from archipelabot.core import events as ev
 from archipelabot.core.progress import Baseline, Progress, direct_baseline, webhost_baseline
 from archipelabot.core.room import RoomState, SlotInfo
+from archipelabot.storage.history import HistoryRepo
+from archipelabot.storage.rooms import RoomRecord, RoomRepo
+from archipelabot.ui.services.progress import ProgressService
 
 from .ap_server import requires_ap_server
 
@@ -112,3 +115,30 @@ async def test_direct_baseline(ap_server):
     assert baseline.checked == {1: set(), 3: set(locations)}
     assert baseline.totals[3] == len(carol.connected.missing_locations)
     assert baseline.totals[1] > 0
+
+
+async def test_last_activity_follows_check_counts(db):
+    room = await RoomRepo(db).create(RoomRecord(guild_id=1, name="R", address="x:1", slot="Alice", created_by=9))
+    state = make_state()
+
+    async def loaded() -> ProgressService:
+        service = ProgressService(
+            room.id, state, Progress(state), HistoryRepo(db), fetch_baseline=None, on_change=lambda urgent: None,
+            periodic=False,
+        )  # fmt: skip
+        await service.load()
+        return service
+
+    service = await loaded()
+    assert service.last_activity is None
+    await service.snapshot()
+    first = service.last_activity
+    assert first is not None
+
+    await service.snapshot()
+    assert service.last_activity == first  # nothing moved
+
+    service.progress.apply(sent(2, 1, 10))
+    await service.snapshot()
+    assert service.last_activity > first
+    assert (await loaded()).last_activity == service.last_activity

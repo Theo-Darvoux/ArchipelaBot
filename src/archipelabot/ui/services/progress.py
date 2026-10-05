@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 from ...core import events as ev
 from ...core.progress import Baseline, Progress, utcnow
@@ -44,6 +45,7 @@ class ProgressService:
         if state.connection == ev.ConnectionState.CONNECTED:
             self._connected.set()
         self._last_snapshot: dict[int, tuple[int, int | None]] = {}
+        self.last_activity: datetime | None = None
 
     async def load(self) -> None:
         """Restore what only the bot knows (deaths, goal times) after a restart."""
@@ -55,7 +57,9 @@ class ProgressService:
                 slot.deaths += 1
             elif event.kind == "goal" and slot.goal_at is None:
                 slot.goal_at = event.at
-        self._last_snapshot = {s.slot: (s.checked, s.total) for s in await self.history.snapshots(self.room_id)}
+        snapshots = await self.history.snapshots(self.room_id)
+        self._last_snapshot = {s.slot: (s.checked, s.total) for s in snapshots}
+        self.last_activity = max((s.at for s in snapshots), default=None)
 
     async def handle(self, event: ev.Event) -> None:
         changed = self.progress.apply(event)
@@ -65,7 +69,7 @@ class ProgressService:
                 self._connected.set()
             case ev.ConnectionChanged():
                 self._connected.clear()
-            case ev.ClientStatusChanged():
+            case ev.ClientStatusChanged() | ev.PlayerJoined() | ev.PlayerLeft():
                 self.on_change(False)
             case ev.GoalReached():
                 self.on_change(True)
@@ -109,6 +113,7 @@ class ProgressService:
         if changed:
             await self.history.snapshot(self.room_id, changed)
             self._last_snapshot.update(current)
+            self.last_activity = now
 
     async def run(self) -> None:
         await asyncio.gather(self._sync_loop(), self._snapshot_loop())

@@ -1,7 +1,7 @@
-"""archipelago.gg (or any Archipelago WebHost): room lookup by URL, current port.
+"""archipelago.gg (or any Archipelago WebHost): room lookup by URL, current port, wake-up.
 
-The bot never wakes a sleeping room on its own: a room only restarts when someone opens its page.
-`wake` exists for the one case where a user explicitly asks to track a room.
+A room shuts down after `timeout` seconds without a new location check (chat and connections don't count),
+and only restarts when someone opens its page: `wake` does that for tracked rooms.
 """
 
 import re

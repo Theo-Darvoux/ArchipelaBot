@@ -55,7 +55,7 @@ class ChatRelay:
             )
             session = await open_session(self.tracker.state.address, options)
             self._sessions[slot] = session
-            self.tracker.state.relay_slots.add(slot)
+            self.tracker.state.share(slot)
             self._drains[slot] = asyncio.create_task(self._drain(slot, session), name=f"chat relay {slot}")
             log.info("Opened a chat connection as %s", options.slot)
             return session

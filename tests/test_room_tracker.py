@@ -6,7 +6,7 @@ from archipelabot.ap import protocol as p
 from archipelabot.ap.client import APRefused, ConnectOptions, open_session
 from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.core import events as ev
-from archipelabot.core.room import RoomTracker
+from archipelabot.core.room import WAKE_GRACE, RoomTracker
 
 from .ap_server import APServer, requires_ap_server
 
@@ -146,6 +146,50 @@ async def test_asleep_until_resolver_gives_a_port():
     finally:
         await tracker.stop()
         server.stop()
+
+
+async def test_wakes_a_sleeping_room():
+    server = APServer()
+    wakes = 0
+
+    async def resolve():
+        return server.address if wakes else None
+
+    async def wake():
+        nonlocal wakes
+        wakes += 1
+
+    tracker, events = await start_tracker(server.address, retry_delays=(0.1,), resolve_address=resolve)
+    tracker.wake = wake
+    server.stop()
+    server = APServer()  # the woken room comes back on another port
+    try:
+        await events.wait_for(lambda e: e == ev.ConnectionChanged(ev.ConnectionState.CONNECTED, server.address))
+        assert wakes == 1
+        assert ev.ConnectionState.ASLEEP not in [e.state for e in events.of_type(ev.ConnectionChanged)]
+    finally:
+        await tracker.stop()
+        server.stop()
+
+
+async def test_asleep_when_waking_does_not_work():
+    server = APServer()
+    wakes = 0
+
+    async def wake():
+        nonlocal wakes
+        wakes += 1
+
+    async def resolve():
+        return None
+
+    tracker, events = await start_tracker(server.address, retry_delays=(0.1,), resolve_address=resolve, wake=wake)
+    server.stop()
+    try:
+        await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.ASLEEP)
+        assert wakes >= WAKE_GRACE
+    finally:
+        await tracker.stop()
 
 
 async def test_refused_at_start(ap_server):

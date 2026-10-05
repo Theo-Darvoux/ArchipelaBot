@@ -1,6 +1,7 @@
 """/track against a real Archipelago server, with Discord replaced by fakes."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import discord
 import pytest
@@ -75,6 +76,17 @@ async def test_track_creates_post_and_posts_items(bot, discord_env, ap_server):
     feed = "\n".join(thread.texts())
     assert "Carol" in feed and "💬 **Carol** : coucou" in feed
     await carol.close()
+
+
+async def test_idle_rooms_are_left_asleep(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    await track(bot, guild, lien=ap_server.address, slot="Alice")
+    runtime = bot.rooms.by_thread(forum.threads[0].id)
+    now = datetime.now(UTC)
+    runtime.progress_service.last_activity = now - timedelta(hours=23)
+    assert runtime.worth_waking(now)
+    runtime.progress_service.last_activity = now - timedelta(hours=25)
+    assert not runtime.worth_waking(now)
 
 
 async def test_stop_and_settings_from_the_post(bot, discord_env, ap_server):

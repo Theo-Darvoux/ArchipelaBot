@@ -17,9 +17,11 @@ RETRY_DELAYS = (5, 10, 20, 40, 80, 160, 300)
 BULK_QUIET = 1.5
 NON_GAME_TAGS = frozenset({"TextOnly", "Tracker", "HintGame"})
 BRIDGE_PREFIX = "[Discord]"
+WAKE_GRACE = 2
 
 type Listener = Callable[[ev.Event], Awaitable[None]]
 type AddressResolver = Callable[[], Awaitable[str | None]]
+type Waker = Callable[[], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +41,7 @@ class RoomState:
     statuses: dict[int, p.ClientStatus] = field(default_factory=dict)
     hints: dict[tuple[int, int], ev.HintInfo] = field(default_factory=dict)  # by (finder, location)
     relay_slots: set[int] = field(default_factory=set)
+    games_on_shared: set[int] = field(default_factory=set)
     connection: ev.ConnectionState = ev.ConnectionState.CONNECTING
 
     def name(self, slot: int) -> str:
@@ -58,11 +61,21 @@ class RoomState:
         return next((s.slot for s in self.slots.values() if s.name == name), None)
 
     def is_online(self, slot: int) -> bool:
-        """A game client is connected to this slot (as far as the server's client status tells)."""
+        """A game client is connected to this slot."""
+        if self.is_shared(slot):  # the bot's own connection keeps the server status up
+            return slot in self.games_on_shared
         status = self.statuses.get(slot, p.ClientStatus.UNKNOWN)
-        if slot == self.own_slot or slot in self.relay_slots:  # the bot's connections make it CONNECTED
-            return status in (p.ClientStatus.READY, p.ClientStatus.PLAYING)
         return status in (p.ClientStatus.CONNECTED, p.ClientStatus.READY, p.ClientStatus.PLAYING)
+
+    def is_shared(self, slot: int) -> bool:
+        return slot == self.own_slot or slot in self.relay_slots
+
+    def share(self, slot: int) -> None:
+        if self.is_online(slot):
+            self.games_on_shared.add(slot)
+        else:
+            self.games_on_shared.discard(slot)
+        self.relay_slots.add(slot)
 
 
 @dataclass(slots=True)
@@ -84,6 +97,7 @@ class RoomTracker:
         datapackages: DataPackageStore,
         *,
         resolve_address: AddressResolver | None = None,
+        wake: Waker | None = None,
         retry_delays: tuple[float, ...] = RETRY_DELAYS,
         bulk_quiet: float = BULK_QUIET,
     ) -> None:
@@ -91,6 +105,7 @@ class RoomTracker:
         self.datapackages = datapackages
         self.state = RoomState(address)
         self.resolve_address = resolve_address
+        self.wake = wake
         self.retry_delays = retry_delays
         self.bulk_quiet = bulk_quiet
         self._listeners: list[Listener] = []
@@ -165,6 +180,11 @@ class RoomTracker:
         status_keys, hint_keys = self._status_keys(), self._hint_keys()
         values = await session.get([*status_keys, *hint_keys])
         self.state.statuses = {slot: p.ClientStatus(values.get(key) or 0) for key, slot in status_keys.items()}
+        self.state.games_on_shared = {
+            slot
+            for slot in {self.state.own_slot, *self.state.relay_slots}
+            if self.state.statuses.get(slot) in (p.ClientStatus.READY, p.ClientStatus.PLAYING)
+        }
         hints = [self._hint_info(raw) for key in hint_keys for raw in values.get(key) or []]
         self.state.hints = {hint.key: hint for hint in hints}
         await session.send(p.set_notify_packet([*status_keys, *hint_keys]))
@@ -210,6 +230,7 @@ class RoomTracker:
 
     async def _reconnect(self, *, wait_first: bool = True) -> APSession | None:
         attempt = 0 if wait_first else -1
+        asleep = 0
         while True:
             if attempt >= 0:
                 await asyncio.sleep(self.retry_delays[min(attempt, len(self.retry_delays) - 1)])
@@ -221,7 +242,14 @@ class RoomTracker:
                     log.warning("Could not resolve the address of %s", self.state.address, exc_info=True)
                     continue
                 if address is None:
-                    await self._set_connection(ev.ConnectionState.ASLEEP)
+                    asleep += 1
+                    if self.wake is None or asleep > WAKE_GRACE:
+                        await self._set_connection(ev.ConnectionState.ASLEEP)
+                    if self.wake:
+                        try:
+                            await self.wake()
+                        except Exception:
+                            log.warning("Could not wake %s", self.state.address, exc_info=True)
                     continue
                 self.state.address = address
             try:
@@ -280,8 +308,10 @@ class RoomTracker:
             case p.PrintJSON(type="ServerChat", message=str(message)):
                 await self._emit(ev.ChatMessage(0, message))
             case p.PrintJSON(type="Join", slot=int(slot), tags=tags) if not NON_GAME_TAGS & set(tags or ()):
+                self.state.games_on_shared.add(slot)
                 await self._emit(ev.PlayerJoined(slot))
             case p.PrintJSON(type="Part", slot=int(slot)) if "has left the game" in packet.text:
+                self.state.games_on_shared.discard(slot)
                 await self._emit(ev.PlayerLeft(slot))
             case p.Bounced() if "DeathLink" in packet.tags:
                 await self._emit(ev.Death(str(packet.data.get("source", "?")), packet.data.get("cause") or None))

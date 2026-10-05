@@ -6,7 +6,7 @@ import io
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -17,7 +17,7 @@ from ..ap.client import ConnectOptions
 from ..core import events as ev
 from ..core.chat import ChatRelay
 from ..core.progress import Progress, direct_baseline, webhost_baseline
-from ..core.room import AddressResolver, RoomTracker
+from ..core.room import AddressResolver, RoomTracker, Waker
 from ..errors import UserError
 from ..recap.chart import render_chart
 from ..recap.stats import Recap, build_recap
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 BOT_TAGS = ("TextOnly", "DeathLink")
+KEEP_AWAKE = timedelta(hours=24)
 
 
 class ThreadSink:
@@ -137,6 +138,10 @@ class RoomRuntime:
         )
         self.panel = PanelService(self.render_panel, self.sink.edit_panel)
         self.chat = ChatRelay(self.tracker, self.record.password)
+
+    def worth_waking(self, now: datetime | None = None) -> bool:
+        last = self.progress_service.last_activity
+        return last is None or (now or datetime.now(UTC)) - last < KEEP_AWAKE
 
     def _claimant_with_mode(self, slot: int, mode: NotifMode) -> int | None:
         user = self.claims.get(slot)
@@ -273,15 +278,21 @@ class RoomManager:
 
     def build_tracker(self, record: RoomRecord) -> RoomTracker:
         resolve: AddressResolver | None = None
+        wake: Waker | None = None
         if webhost := record.webhost:
 
             async def resolve_webhost() -> str | None:
                 return await self.bot.webhost.current_address(webhost)
 
-            resolve = resolve_webhost
+            async def wake_webhost() -> None:
+                runtime = self._rooms.get(record.id)
+                if runtime is None or runtime.worth_waking():
+                    await self.bot.webhost.wake(webhost)
+
+            resolve, wake = resolve_webhost, wake_webhost
 
         options = ConnectOptions(slot=record.slot, password=record.password, tags=BOT_TAGS)
-        return RoomTracker(record.address, options, self.bot.datapackages, resolve_address=resolve)
+        return RoomTracker(record.address, options, self.bot.datapackages, resolve_address=resolve, wake=wake)
 
     async def attach(self, record: RoomRecord, tracker: RoomTracker) -> RoomRuntime:
         """Start posting a tracker's events in the record's forum post."""

@@ -25,6 +25,7 @@ EXTENSIONS = (
     "archipelabot.ui.cogs.claim",
     "archipelabot.ui.cogs.status",
     "archipelabot.ui.cogs.bridge",
+    "archipelabot.ui.cogs.help",
 )
 
 
@@ -59,6 +60,7 @@ class ArchipelaBot(commands.Bot):
             command_prefix=commands.when_mentioned,
             help_command=None,
             intents=intents,
+            activity=discord.Game("/help"),
             tree_cls=Tree,
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -69,6 +71,7 @@ class ArchipelaBot(commands.Bot):
         self.datapackages = DataPackageStore(settings.database_path.parent / "datapackage")
         self.rooms = RoomManager(self)
         self.http_session: aiohttp.ClientSession | None = None
+        self.command_ids: dict[str, int] = {}
 
     @property
     def webhost(self) -> WebhostClient:
@@ -106,6 +109,11 @@ class ArchipelaBot(commands.Bot):
         else:
             synced = await self.tree.sync()
             log.info("Synced %d global commands", len(synced))
+        self.command_ids = {command.name: command.id for command in synced}
+
+    def command_mention(self, name: str) -> str:
+        command_id = self.command_ids.get(name.split()[0])
+        return f"</{name}:{command_id}>" if command_id else f"`/{name}`"
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%d guilds)", self.user, len(self.guilds))

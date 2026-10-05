@@ -22,6 +22,7 @@ salon forum, avec un panneau de status, le fil des items, les événements impor
 
 | Commande | Effet |
 |---|---|
+| `/help` | Comment fonctionne le bot et ce que fait chaque commande |
 | `/config forum` · `recap` · `voir` | Configuration du serveur (permission *Gérer le serveur*) |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum |
 | `/track reglages` | Dans le post d'une room : choisir ce qui est affiché |
@@ -34,18 +35,17 @@ salon forum, avec un panneau de status, le fil des items, les événements impor
 
 ## Déploiement (VPS avec Docker)
 
-Sur le serveur : Docker et le plugin Compose (`docker compose version`). Depuis ta machine :
+Sur le serveur : Docker et le plugin Compose (`docker compose version`). Arrête le bot local avant (deux instances
+posteraient tout en double).
 
-1. **Première fois uniquement** : arrête le bot local (deux instances posteraient tout en double), puis copie la
-   configuration et les données pour garder les rooms suivies, les claims et l'historique :
+1. **Première fois** :
    ```sh
-   ssh user@host mkdir -p archipelabot
-   scp .env user@host:archipelabot/.env
-   rsync -a data/ user@host:archipelabot/data/
+   git clone https://github.com/Theo-Darvoux/ArchipelaBot.git && cd ArchipelaBot
+   cp .env.example .env   # puis remplis DISCORD_TOKEN
+   docker compose up -d --build
    ```
-2. **Déployer** (et à chaque mise à jour) : `scripts/deploy.sh user@host` copie le code, reconstruit l'image et
-   relance le bot. Le `.env` et `data/` du serveur ne sont jamais écrasés.
-3. **Logs** : `ssh user@host 'cd archipelabot && docker compose logs -f'`
+2. **Mise à jour** : `git pull && docker compose up -d --build`. Le `.env` et `data/` ne sont jamais touchés.
+3. **Logs** : `docker compose logs -f`
 
 Avec `DEV_GUILD_ID` dans le `.env`, les commandes ne sont disponibles que sur ce serveur Discord (mise à jour
 instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une heure à les afficher.

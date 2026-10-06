@@ -134,17 +134,15 @@ def waiting_line(ping: Ping) -> Line:
     return Line(f"{E.ping} <@{ping.user}> · {count} : {item_list(ping.items)}", ping)
 
 
-def connection_line(event: ev.ConnectionChanged, downtime: float | None) -> Line | None:
+def connection_line(event: ev.ConnectionChanged, address_changed: bool) -> Line | None:
     match event.state:
-        case ev.ConnectionState.CONNECTED if downtime is not None and downtime >= 30:
-            return Line(f"-# {E.online} Reconnecté à la room · `{event.address}`")
+        case ev.ConnectionState.CONNECTED if address_changed:
+            return Line(f"-# {E.online} Reconnecté à la room, nouveau lien · `{event.address}`")
         case ev.ConnectionState.ASLEEP:
             return Line(
                 f"-# {E.offline} La room s'est endormie. "
                 "Le suivi reprendra tout seul dès que quelqu'un ouvrira sa page."
             )
-        case ev.ConnectionState.UNREACHABLE:
-            return Line(f"-# {E.offline} Serveur injoignable. Le suivi reprendra tout seul dès qu'il répondra.")
         case ev.ConnectionState.FAILED:
             return Line(
                 f"{E.failed} Le serveur a refusé la connexion ({event.detail}). Suivi en pause : "

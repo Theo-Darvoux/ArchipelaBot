@@ -194,26 +194,22 @@ async def test_a_user_is_pinged_once_even_across_several_messages():
     assert sink.mentions == [(222,), (), ()]
 
 
-async def test_feed_reports_only_long_outages():
-    now = [0.0]
+async def test_feed_reports_only_sleep_and_address_changes():
     sink = Sink()
-    feed = FeedService(STATE, lambda: SETTINGS, sink, clock=lambda: now[0])
-    conn = lambda state: ev.ConnectionChanged(state, "archipelago.gg:40000")  # noqa: E731
+    feed = FeedService(RoomState("archipelago.gg:40000"), lambda: SETTINGS, sink)
+    conn = lambda state, port=40000: ev.ConnectionChanged(state, f"archipelago.gg:{port}")  # noqa: E731
 
     await feed.handle(conn(ev.ConnectionState.RECONNECTING))
-    now[0] = 10
+    await feed.handle(conn(ev.ConnectionState.UNREACHABLE))
     await feed.handle(conn(ev.ConnectionState.CONNECTED))
     await feed.flush()
-    assert sink.sent == []  # a 10 s blip is not worth a message
+    assert sink.sent == []  # same address: nothing worth a message
 
-    await feed.handle(conn(ev.ConnectionState.RECONNECTING))
-    now[0] = 20
     await feed.handle(conn(ev.ConnectionState.ASLEEP))
-    now[0] = 200
-    await feed.handle(conn(ev.ConnectionState.CONNECTED))
+    await feed.handle(conn(ev.ConnectionState.CONNECTED, 41000))
     await feed.flush()
     [message] = sink.sent
-    assert "endormie" in message and "Reconnecté à la room · `archipelago.gg:40000`" in message
+    assert "endormie" in message and "nouveau lien · `archipelago.gg:41000`" in message
 
 
 async def test_panel_edits_are_throttled_but_urgent_ones_go_fast():

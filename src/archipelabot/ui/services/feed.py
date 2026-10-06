@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
@@ -74,34 +73,29 @@ class FeedService:
         ping: Pinger = no_ping,
         presence: Presence | None = None,
         interval: float = 3.0,
-        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.state = state
         self.settings = settings
         self.sink = sink
         self.ping = ping
         self.interval = interval
-        self.clock = clock
         self.presence = presence or Presence(state)
         self._pending: list[FeedOutput] = []
         self._held: Held = defaultdict(list)
-        self._down_since: float | None = None
+        self._address = state.address
 
     async def handle(self, event: ev.Event) -> None:
         if isinstance(event, ev.ConnectionChanged):
-            if line := connection_line(event, self._downtime(event.state)):
+            if line := connection_line(event, self._address_changed(event)):
                 self._pending.append(line)
         else:
             self._pending.extend(render_event(event, self.state, self.settings(), self.ping))
 
-    def _downtime(self, state: ev.ConnectionState) -> float | None:
-        if state == ev.ConnectionState.CONNECTED:
-            down_since, self._down_since = self._down_since, None
-            return None if down_since is None else self.clock() - down_since
-        down = (ev.ConnectionState.RECONNECTING, ev.ConnectionState.ASLEEP, ev.ConnectionState.UNREACHABLE)
-        if state in down and self._down_since is None:
-            self._down_since = self.clock()
-        return None
+    def _address_changed(self, event: ev.ConnectionChanged) -> bool:
+        if event.state != ev.ConnectionState.CONNECTED or event.address == self._address:
+            return False
+        self._address = event.address
+        return True
 
     async def flush(self) -> None:
         pending, self._pending = self._pending, []

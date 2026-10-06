@@ -88,6 +88,30 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (room_id, slot)
     );
     """,
+    """
+    ALTER TABLE guild_config ADD COLUMN ping_role_id INTEGER;
+    CREATE TABLE game (
+        id                  INTEGER PRIMARY KEY,
+        guild_id            INTEGER NOT NULL,
+        thread_id           INTEGER UNIQUE,
+        panel_message_id    INTEGER,
+        name                TEXT NOT NULL,
+        description         TEXT NOT NULL DEFAULT '',
+        status              TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'started', 'cancelled')),
+        created_by          INTEGER NOT NULL,
+        created_at          TEXT NOT NULL
+    );
+    CREATE INDEX game_status ON game (status);
+    CREATE TABLE game_yaml (
+        id          INTEGER PRIMARY KEY,
+        game_id     INTEGER NOT NULL REFERENCES game (id) ON DELETE CASCADE,
+        user_id     INTEGER NOT NULL,
+        filename    TEXT NOT NULL,
+        content     BLOB NOT NULL,
+        uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX game_yaml_game ON game_yaml (game_id);
+    """,
 ]
 
 

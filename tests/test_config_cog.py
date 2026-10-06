@@ -9,7 +9,7 @@ from .fakes import FakeForum, FakeInteraction, FakeTag, view_text
 
 def test_commands_are_registered(bot):
     names = {cmd.qualified_name for cmd in bot.tree.walk_commands()}
-    assert {"config forum", "config recap", "config voir"} <= names
+    assert {"config forum", "config recap", "config annonces", "config voir", "partie nouvelle"} <= names
 
 
 async def test_ensure_room_tags_creates_only_missing():
@@ -17,7 +17,7 @@ async def test_ensure_room_tags_creates_only_missing():
     tags = await ensure_room_tags(forum)
 
     assert tags[RoomTag.ACTIVE].id == 42
-    assert [t.name for t in forum.available_tags] == ["En cours", "Autre", "Endormie", "Terminée"]
+    assert [t.name for t in forum.available_tags] == ["En cours", "Autre", "Inscriptions", "Endormie", "Terminée"]
     assert set(tags) == set(TAG_SPECS)
 
 
@@ -29,7 +29,7 @@ async def test_set_forum_saves_config_and_creates_tags(bot):
     await cog.set_forum.callback(cog, interaction, forum)
 
     assert (await bot.guild_configs.get(1)).forum_id == 555
-    assert len(forum.available_tags) == 3
+    assert len(forum.available_tags) == 4
     [reply] = interaction.replies
     assert reply["ephemeral"] and "<#555>" in view_text(reply["view"])
 
@@ -73,3 +73,20 @@ async def test_user_errors_are_shown_ephemerally(bot):
     await bot.tree.on_error(interaction, UserError("Room introuvable"))
     [reply] = interaction.replies
     assert reply["ephemeral"] and "Room introuvable" in view_text(reply["view"])
+
+
+async def test_ping_role_set_and_cleared(bot):
+    cog = bot.get_cog("config")
+
+    class Role:
+        id = 9
+        mention = "<@&9>"
+
+    await cog.set_ping_role.callback(cog, FakeInteraction(), Role())
+    assert (await bot.guild_configs.get(1)).ping_role_id == 9
+    interaction = FakeInteraction()
+    await cog.show.callback(cog, interaction)
+    assert "<@&9>" in view_text(interaction.replies[0]["view"])
+
+    await cog.set_ping_role.callback(cog, FakeInteraction(), None)
+    assert (await bot.guild_configs.get(1)).ping_role_id is None

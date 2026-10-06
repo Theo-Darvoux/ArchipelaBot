@@ -55,15 +55,30 @@ class ConfigCog(
         )
         await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
 
+    @app_commands.command(name="annonces", description="Choisir le rôle pingé quand une partie est annoncée")
+    @app_commands.describe(role="Laisser vide pour ne pinger personne")
+    async def set_ping_role(self, interaction: Interaction, role: discord.Role | None = None) -> None:
+        config = await self.bot.guild_configs.get(interaction.guild_id)
+        config.ping_role_id = role.id if role else None
+        await self.bot.guild_configs.save(config)
+        text = (
+            f"{role.mention} sera pingé à l'annonce d'une partie et à l'ouverture de sa room."
+            if role
+            else "Personne ne sera pingé à l'annonce d'une partie."
+        )
+        await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
+
     @app_commands.command(name="voir", description="Afficher la configuration actuelle")
     async def show(self, interaction: Interaction) -> None:
         config = await self.bot.guild_configs.get(interaction.guild_id)
         forum = f"<#{config.forum_id}>" if config.forum_id else "*non configuré* — utilise `/config forum`"
         recap = f"<#{config.recap_channel_id}>" if config.recap_channel_id else "*post de la room uniquement*"
-        await interaction.response.send_message(
-            view=notice(f"### {E.settings} Configuration\n**Forum des rooms** : {forum}\n**Récaps** : {recap}"),
-            ephemeral=True,
+        role = f"<@&{config.ping_role_id}>" if config.ping_role_id else "*personne*"
+        text = (
+            f"### {E.settings} Configuration\n**Forum des rooms** : {forum}\n**Récaps** : {recap}\n"
+            f"**Pingé pour les nouvelles parties** : {role}"
         )
+        await interaction.response.send_message(view=notice(text), ephemeral=True)
 
 
 async def setup(bot: "ArchipelaBot") -> None:

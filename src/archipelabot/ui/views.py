@@ -31,8 +31,6 @@ SETTING_TOGGLES: list[tuple[str, str, str, str]] = [
 
 
 class SettingsView(ui.LayoutView):
-    """Ephemeral toggles for a room's settings; each click saves immediately."""
-
     def __init__(self, room_name: str, settings: RoomSettings, save: Callable[[RoomSettings], Awaitable[None]]) -> None:
         super().__init__(timeout=600)
         self.room_name = room_name

@@ -26,7 +26,7 @@ from ..storage.claims import ClaimRepo, NotifMode, NotifPrefs
 from ..storage.history import HistoryRepo
 from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
 from .emojis import E
-from .forum import TAG_SPECS, RoomTag
+from .forum import TAG_SPECS, Post, RoomTag
 from .panel_buttons import ClaimButton, MyHintsButton, SettingsButton
 from .render.feed import feed_view
 from .render.panel import panel_view
@@ -71,7 +71,7 @@ def can_manage(record: RoomRecord, user_id: int, permissions: discord.Permission
 class ThreadSink:
     """Everything the services post goes through here."""
 
-    def __init__(self, bot: "ArchipelaBot", record: RoomRecord, on_gone: Callable[[], None] = lambda: None) -> None:
+    def __init__(self, bot: "ArchipelaBot", record: Post, on_gone: Callable[[], None] = lambda: None) -> None:
         self.bot = bot
         self.record = record
         self.on_gone = on_gone
@@ -102,8 +102,8 @@ class ThreadSink:
         user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
         await user.send(view=view)
 
-    async def send_view(self, view: ui.LayoutView) -> None:
-        await (await self.thread()).send(view=view)
+    async def send_view(self, view: ui.LayoutView, allowed_mentions: discord.AllowedMentions | None = None) -> None:
+        await (await self.thread()).send(view=view, allowed_mentions=allowed_mentions or discord.AllowedMentions.none())
 
     async def edit_panel(self, view: ui.LayoutView) -> None:
         thread = await self.thread()

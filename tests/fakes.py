@@ -1,5 +1,6 @@
 """Minimal stand-ins for discord.py objects, enough to drive cogs without a gateway connection."""
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -83,6 +84,9 @@ class FakeThread:
         if archived is not None:
             self.archived = archived
 
+    def typing(self):
+        return _NoTyping()
+
     def texts(self) -> list[str]:
         """Feed messages: everything after the panel."""
         return [m.text for m in self.messages[1:]]
@@ -134,6 +138,9 @@ class FakeResponse:
     async def edit_message(self, **kwargs) -> None:
         self.sent.append(kwargs)
 
+    async def send_modal(self, modal) -> None:
+        self.sent.append({"modal": modal})
+
 
 class FakeFollowup:
     def __init__(self) -> None:
@@ -146,6 +153,7 @@ class FakeFollowup:
 @dataclass
 class FakeUser:
     id: int = 77
+    bot: bool = False
 
     def __str__(self) -> str:
         return "theo"
@@ -178,3 +186,45 @@ class FakeInteraction:
 def view_text(view: discord.ui.LayoutView) -> str:
     """All the text displayed by a Components V2 view, in order."""
     return "\n".join(item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay))
+
+
+class _NoTyping(contextlib.AbstractAsyncContextManager):
+    async def __aexit__(self, *_exc) -> None:
+        return None
+
+
+@dataclass
+class FakeAttachment:
+    filename: str
+    content: bytes
+
+    @property
+    def size(self) -> int:
+        return len(self.content)
+
+    async def read(self) -> bytes:
+        return self.content
+
+
+@dataclass
+class FakeUserMessage:
+    """A message someone wrote in a thread, as on_message receives it."""
+
+    channel: FakeThread
+    content: str = ""
+    attachments: list = field(default_factory=list)
+    author: FakeUser = field(default_factory=FakeUser)
+    guild: FakeGuild = field(default_factory=FakeGuild)
+    type: discord.MessageType = discord.MessageType.default
+    reactions: list = field(default_factory=list)
+    replies: list[dict] = field(default_factory=list)
+
+    @property
+    def clean_content(self) -> str:
+        return self.content
+
+    async def add_reaction(self, emoji) -> None:
+        self.reactions.append(str(emoji))
+
+    async def reply(self, content=None, **kwargs) -> None:
+        self.replies.append({"content": content, **kwargs})

@@ -17,8 +17,10 @@ from .storage.db import Database
 from .storage.guilds import GuildRepo
 from .ui.components import Tone, notice
 from .ui.emojis import ensure_uploaded
+from .ui.games import GameManager
 from .ui.panel_buttons import ClaimButton, MyHintsButton, SettingsButton
 from .ui.rooms import RoomManager
+from .ui.signup_buttons import YamlButton, YamlsZipButton
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ BACKUPS_KEPT = 7
 EXTENSIONS = (
     "archipelabot.ui.cogs.config",
     "archipelabot.ui.cogs.track",
+    "archipelabot.ui.cogs.game",
     "archipelabot.ui.cogs.claim",
     "archipelabot.ui.cogs.status",
     "archipelabot.ui.cogs.bridge",
@@ -76,6 +79,7 @@ class ArchipelaBot(commands.Bot):
         self.notif_prefs = NotifPrefs(db)
         self.datapackages = DataPackageStore(settings.database_path.parent / "datapackage")
         self.rooms = RoomManager(self)
+        self.games = GameManager(self)
         self.http_session: aiohttp.ClientSession | None = None
         self.command_ids: dict[str, int] = {}
         self._backups: asyncio.Task[None] | None = None
@@ -92,10 +96,11 @@ class ArchipelaBot(commands.Bot):
             await ensure_uploaded(self)
         except discord.HTTPException:
             log.warning("Could not upload the bot's icons; falling back to Unicode emojis", exc_info=True)
-        self.add_dynamic_items(ClaimButton, MyHintsButton, SettingsButton)
+        self.add_dynamic_items(ClaimButton, MyHintsButton, SettingsButton, YamlButton, YamlsZipButton)
         await self.load_extensions()
         await self.sync_commands()
         await self.rooms.restore()
+        await self.games.restore()
         self._backups = asyncio.create_task(self.backup_loop(), name="backups")
 
     async def close(self) -> None:
@@ -120,7 +125,6 @@ class ArchipelaBot(commands.Bot):
             await self.load_extension(extension)
 
     async def sync_commands(self) -> None:
-        """Send the commands to Discord only when they changed: syncing is heavily rate limited."""
         guild = discord.Object(self.settings.dev_guild_id) if self.settings.dev_guild_id else None
         if guild:
             self.tree.copy_global_to(guild=guild)
@@ -147,3 +151,4 @@ class ArchipelaBot(commands.Bot):
 
     async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
         self.rooms.thread_deleted(payload.thread_id)
+        self.games.thread_deleted(payload.thread_id)

@@ -1,7 +1,8 @@
 # ArchipelaBot
 
-Bot Discord pour suivre des parties [Archipelago](https://archipelago.gg) : chaque room suivie a son post dans un
-salon forum, avec un panneau de status, le fil des items, les événements importants et le pont de chat.
+Bot Discord pour organiser et suivre des parties [Archipelago](https://archipelago.gg) : chaque partie a son post
+dans un salon forum, de l'annonce (inscriptions et yamls) jusqu'à la fin, avec un panneau de status, le fil des items,
+les événements importants et le pont de chat.
 
 ## Installation
 
@@ -23,8 +24,9 @@ salon forum, avec un panneau de status, le fil des items, les événements impor
 | Commande | Effet |
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
-| `/config forum` · `recap` · `voir` | Configuration du serveur (permission *Gérer le serveur*) |
-| `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum |
+| `/config forum` · `recap` · `annonces` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre |
+| `/partie nouvelle [nom] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas) |
+| `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
 | `/track reglages` | Dans le post d'une room : choisir ce qui est affiché |
 | `/track reconnect [mot_de_passe]` | Dans le post d'une room : relancer la connexion tout de suite (par exemple après un refus du serveur), en changeant le mot de passe si besoin |
 | `/track stop` | Dans le post d'une room : arrêter le suivi, avec ou sans récap |
@@ -54,6 +56,18 @@ posteraient tout en double).
 
 Avec `DEV_GUILD_ID` dans le `.env`, les commandes ne sont disponibles que sur ce serveur Discord (mise à jour
 instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une heure à les afficher.
+
+## Une partie, un post
+
+1. `/partie nouvelle` crée le post avec le tag *Inscriptions* et pinge le rôle choisi avec `/config annonces`.
+2. Chacun envoie son yaml avec le bouton **Mon yaml** (plusieurs fichiers possibles) ou en le déposant dans le post.
+   Le bot lit le nom du slot et le jeu, refuse un nom déjà pris par quelqu'un d'autre, et prévient si un nom dépasse
+   16 caractères (Archipelago le coupe). Renvoyer un yaml pour le même slot remplace l'ancien. **Tous les yamls**
+   donne un zip à mettre dans `Players/` pour générer.
+3. Quand la room est prête, n'importe qui colle son lien (`archipelago.gg/room/…`) dans le post : le panneau devient
+   celui de la room, le tag passe à *En cours*, chaque slot est attribué à qui a envoyé son yaml (les noms avec
+   `{number}` ou `{player}` quand il n'y a pas d'ambiguïté), et le bot pinge le rôle et les joueurs inscrits. Pour
+   une room avec mot de passe, utilise `/track start` dans le post.
 
 ## Pont de chat
 

@@ -15,7 +15,6 @@ async def run(settings: Settings) -> None:
     db = await Database.open(settings.database_path)
     try:
         async with ArchipelaBot(settings, db) as bot:
-            # Docker stops the bot with SIGTERM: leave like on Ctrl+C, so that pending posts are saved.
             start = asyncio.ensure_future(bot.start(settings.discord_token.get_secret_value()))
             asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, start.cancel)
             with contextlib.suppress(asyncio.CancelledError):
@@ -26,7 +25,7 @@ async def run(settings: Settings) -> None:
 
 def main() -> None:
     try:
-        settings = Settings()
+        settings = Settings()  # type: ignore[call-arg]
     except ValidationError as e:
         missing = ", ".join(str(err["loc"][0]).upper() for err in e.errors())
         raise SystemExit(f"Configuration invalide ou manquante : {missing}.") from None

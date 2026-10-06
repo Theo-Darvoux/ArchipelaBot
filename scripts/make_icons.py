@@ -56,6 +56,10 @@ GLYPHS = {
     "notif_off": ("notifications_off", GREY),
     "error": ("cancel", RED),
     "info": ("info", BLURPLE),
+    "signup": ("edit_note", GREEN),
+    "yaml": ("description", USEFUL),
+    "zip": ("folder_zip", GOLD),
+    "random": ("casino", BLURPLE),
 }
 
 

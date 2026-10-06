@@ -45,6 +45,10 @@ FALLBACKS: dict[str, str] = {
     "notif_off": "🔕",
     "error": "❌",
     "info": "\N{INFORMATION SOURCE}\N{VARIATION SELECTOR-16}",
+    "signup": "📝",
+    "yaml": "📄",
+    "zip": "📦",
+    "random": "🎲",
 }
 
 

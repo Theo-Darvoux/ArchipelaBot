@@ -1,15 +1,24 @@
 from enum import StrEnum
+from typing import Protocol
 
 import discord
 
 
 class RoomTag(StrEnum):
+    SIGNUP = "signup"
     ACTIVE = "active"
     ASLEEP = "asleep"
     FINISHED = "finished"
 
 
+class Post(Protocol):
+    guild_id: int
+    thread_id: int | None
+    panel_message_id: int | None
+
+
 TAG_SPECS: dict[RoomTag, tuple[str, str]] = {
+    RoomTag.SIGNUP: ("Inscriptions", "📝"),
     RoomTag.ACTIVE: ("En cours", "🟢"),
     RoomTag.ASLEEP: ("Endormie", "💤"),
     RoomTag.FINISHED: ("Terminée", "🏁"),

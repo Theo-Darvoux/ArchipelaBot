@@ -16,9 +16,13 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
     start = (
         "### Pour commencer\n"
         f"**1.** Un admin choisit le salon forum avec {cmd('config forum')} (une seule fois).\n"
-        f"**2.** Quelqu'un lance {cmd('track start')} avec le lien de la room (`archipelago.gg/room/…`). "
-        "Le bot crée son post dans le forum.\n"
-        f"**3.** Dans ce post, chacun clique sur {E.claim} **Je joue** pour indiquer son slot."
+        f"**2.** Quelqu'un annonce la partie avec {cmd('partie nouvelle')} : le bot crée son post dans le forum. "
+        f"Chacun y envoie son yaml ({E.yaml} **Mon yaml**, ou en déposant le fichier dans le post), et "
+        f"{E.zip} **Tous les yamls** donne le zip pour générer.\n"
+        "**3.** Une fois la partie générée, colle le lien de la room (`archipelago.gg/room/…`) dans le post : "
+        "le suivi démarre et chacun est relié à son slot d'après son yaml.\n"
+        f"-# Sans inscriptions : {cmd('track start')} avec le lien de la room crée directement le post, et chacun "
+        f"clique sur {E.claim} **Je joue**."
     )
     room = (
         f"### {E.chat} Dans le post d'une room\n"
@@ -38,7 +42,7 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
     )
     admin = (
         f"### {E.settings} Admins\n"
-        f"{cmd('config forum')} · {cmd('config recap')} · {cmd('config voir')}\n"
+        f"{cmd('config forum')} · {cmd('config recap')} · {cmd('config annonces')} · {cmd('config voir')}\n"
         "-# Réservé à la permission *Gérer le serveur*."
     )
 

@@ -29,38 +29,51 @@ def signup_roster(files: Sequence[YamlFile]) -> str:
         for f in files
         for player in f.players
     ]
-    return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres") or "*Aucun yaml pour l'instant.*"
+    return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres") or "*Personne pour l'instant.*"
 
 
 def signup_view(
     game: GameRecord,
     files: Sequence[YamlFile],
     *,
+    track_command: str = "`/track start`",
     ping_role_id: int | None = None,
     buttons: list[ui.Item] | None = None,
 ) -> ui.LayoutView:
+    header = f"## {md(game.name)}"
+    if game.starts_at:
+        start = game.starts_at
+        header += f"\n{E.calendar} **{discord.utils.format_dt(start, 'F')}** · {discord.utils.format_dt(start, 'R')}"
+    if game.description:
+        header += "\n" + "\n".join(f"> {line}" for line in game.description.splitlines())
+    header += f"\n-# Organisée par <@{game.created_by}>" + (f" · pour <@&{ping_role_id}>" if ping_role_id else "")
+    cancelled = game.status == "cancelled"
+    if cancelled:
+        header += f"\n### {E.stopped} Partie annulée"
+
     slots = sum(len(f.players) for f in files)
     people = len({f.user_id for f in files})
-    header = f"## {md(game.name)}\n{E.signup} **Inscriptions ouvertes** · {plural(slots, 'slot')} · " + plural(
-        people, "joueur"
-    )
-    if game.description:
-        header += f"\n{game.description}"
-    if ping_role_id:
-        header += f"\n{E.ping} <@&{ping_role_id}>"
-    header += (
-        f"\n-# Créée par <@{game.created_by}> {discord.utils.format_dt(game.created_at, 'R')}"
-        "\n-# Envoie ton yaml avec le bouton ou dépose-le dans ce post. Quand la room est générée, colle son lien "
-        "ici (`archipelago.gg/room/…`) : le suivi démarre tout seul."
+    count = plural(people, "joueur") + (f" · {plural(slots, 'slot')}" if slots != people else "")
+    roster = f"### {E.signup} Inscrits" + (f" · {count}" if files else "") + f"\n{signup_roster(files)}"
+
+    steps = (
+        "### Comment participer\n"
+        f"**1.** Clique sur **{E.yaml} Mon yaml** pour envoyer ton fichier `.yaml`, ou glisse-le dans ce post. "
+        "Tu peux le remplacer ou le retirer tant que la partie n'a pas commencé.\n"
+        f"**2.** Quand tout le monde est inscrit, l'organisateur récupère **{E.zip} Tous les yamls** et génère "
+        "la partie.\n"
+        f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "
+        "partie et chacun est relié à son slot."
     )
     view = ui.LayoutView(timeout=None)
     view.add_item(
         ui.Container(
             ui.TextDisplay(header),
             ui.Separator(),
-            ui.TextDisplay(signup_roster(files)),
-            *([ui.Separator(), ui.ActionRow(*buttons)] if buttons else []),
-            accent_colour=Tone.INFO.value,
+            ui.TextDisplay(roster),
+            *([] if cancelled else [ui.Separator(), ui.TextDisplay(steps)]),
+            *([ui.Separator(), ui.ActionRow(*buttons)] if buttons and not cancelled else []),
+            accent_colour=discord.Colour.dark_grey() if cancelled else Tone.INFO.value,
         )
     )
     return view

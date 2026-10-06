@@ -68,7 +68,10 @@ class ConfirmView(ui.LayoutView):
     """A question with one or more actions, plus "Annuler". Each action returns the message shown afterwards."""
 
     def __init__(
-        self, question: str, actions: list[tuple[str, discord.ButtonStyle, Callable[[], Awaitable[str]]]]
+        self,
+        question: str,
+        actions: list[tuple[str, discord.ButtonStyle, Callable[[], Awaitable[str]]]],
+        cancel_label: str = "Annuler",
     ) -> None:
         super().__init__(timeout=120)
         self._answered = False
@@ -77,7 +80,7 @@ class ConfirmView(ui.LayoutView):
             button = ui.Button(label=label, style=style)
             button.callback = self._run(action)
             self.buttons.append(button)
-        cancel = ui.Button(label="Annuler", style=discord.ButtonStyle.secondary)
+        cancel = ui.Button(label=cancel_label, style=discord.ButtonStyle.secondary)
         cancel.callback = self._cancel
         self.buttons.append(cancel)
         self.add_item(ui.Container(ui.TextDisplay(question), ui.ActionRow(*self.buttons)))

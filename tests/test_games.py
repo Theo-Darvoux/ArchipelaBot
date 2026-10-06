@@ -1,12 +1,13 @@
 import io
 import zipfile
-from datetime import UTC, datetime
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import discord
 import pytest
 
-from archipelabot.ap.webhost import RoomNotFound, RoomStatus
 from archipelabot.core import events as ev
+from archipelabot.errors import UserError
 from archipelabot.storage.guilds import GuildConfig
 from archipelabot.ui.games import GameManager
 from archipelabot.ui.signup_buttons import MyYamlsView, YamlButton, YamlModal, YamlsZipButton
@@ -25,7 +26,7 @@ def yaml(name: str, game: str = "Celeste") -> bytes:
 async def new_game(bot, guild, user=77, **kwargs) -> FakeInteraction:
     cog = bot.get_cog("partie")
     interaction = FakeInteraction(guild=guild, user=FakeUser(id=user))
-    await cog.new.callback(cog, interaction, **{"nom": "Samedi", "description": None, **kwargs})
+    await cog.new.callback(cog, interaction, **{"nom": "Samedi", "debut": None, "description": None, **kwargs})
     return interaction
 
 
@@ -33,7 +34,7 @@ async def new_game(bot, guild, user=77, **kwargs) -> FakeInteraction:
 async def game(bot, discord_env):  # noqa: F811
     guild, forum = discord_env
     await bot.guild_configs.save(GuildConfig(guild.id, forum_id=forum.id, ping_role_id=ROLE))
-    await new_game(bot, guild, description="21h, vocal")
+    await new_game(bot, guild, debut="12/10/2099 21h", description="Vocal ouvert\npas de spoil")
     [thread] = forum.threads
     return bot.games.by_thread(thread.id), thread
 
@@ -50,8 +51,12 @@ async def test_new_game_opens_a_signup_post(bot, game):
     assert [t.name for t in thread.applied_tags] == ["Inscriptions"]
     assert thread.messages[0].pinned
     panel = view_text(thread.messages[0].view)
-    assert "Inscriptions ouvertes" in panel and "21h, vocal" in panel and f"<@&{ROLE}>" in panel
-    assert "Aucun yaml" in panel
+    assert "> Vocal ouvert\n> pas de spoil" in panel
+    starts = int(datetime(2099, 10, 12, 21, tzinfo=ZoneInfo("Europe/Paris")).timestamp())
+    assert f"**<t:{starts}:F>** · <t:{starts}:R>" in panel
+    assert f"Organisée par <@77> · pour <@&{ROLE}>" in panel
+    assert "Inscrits\n*Personne pour l'instant.*" in panel
+    assert "Comment participer" in panel and "`/track start` ici avec le lien de la room" in panel
     buttons = [i.item for i in thread.messages[0].view.walk_children() if isinstance(i, discord.ui.DynamicItem)]
     assert [b.label for b in buttons] == ["Mon yaml", "Tous les yamls"]
     assert record.status == "open" and [g.id for g in await bot.games.repo.open()] == [record.id]
@@ -78,7 +83,7 @@ async def test_yamls_fill_the_panel(bot, game):
     assert [u.error for u in uploads] == [None, None, "ce n'est pas un fichier `.yaml`."]
     assert uploads[1].warnings
     panel = view_text(thread.messages[0].view)
-    assert "3 slots · 1 joueur" in panel
+    assert "Inscrits · 1 joueur · 3 slots" in panel
     assert "**Psders1** · *Luigi's Mansion* · <@77>" in panel
     assert "**Leo{number}** *(nom provisoire)*" in panel
     assert "**AVeryLongPlayerN** · *Terraria*" in panel
@@ -112,7 +117,7 @@ async def test_my_yaml_button_opens_the_upload_then_lists_mine(bot, game):
     remove = next(b for b in view.walk_children() if getattr(b, "label", "") == "Retirer")
     await remove.callback(click(bot))
     assert "aucun yaml" in view_text(view)
-    assert "Aucun yaml" in view_text(thread.messages[0].view)
+    assert "Personne pour l'instant" in view_text(thread.messages[0].view)
 
 
 async def test_everyone_can_download_every_yaml(bot, game):
@@ -191,49 +196,6 @@ async def test_tracking_in_the_post_claims_the_slots(bot, game, ap_server):
     assert {u.id for u in opened.allowed_mentions.users} == {1, 2}
 
 
-@requires_ap_server
-async def test_pasting_the_room_link_starts_tracking(bot, game, ap_server, monkeypatch):
-    _, thread = game
-
-    class Site:
-        async def room_status(self, _room):
-            return RoomStatus(ap_server.port, [("Alice", "Celeste 64")], datetime.now(UTC), 7200, None)
-
-        async def current_address(self, _room):
-            return ap_server.address
-
-        async def wake(self, _room):
-            pass
-
-    monkeypatch.setattr(type(bot), "webhost", property(lambda _self: Site()))
-    cog = bot.get_cog("partie")
-    message = FakeUserMessage(thread, content="c'est parti : https://archipelago.gg/room/AbC-1 !", author=FakeUser(5))
-    await cog.on_message(message)
-    assert not message.replies
-    runtime = bot.rooms.by_thread(thread.id)
-    assert runtime.record.webhost.room_id == "AbC-1"
-
-    again = FakeUserMessage(thread, content="https://archipelago.gg/room/AbC-1")
-    await cog.on_message(again)
-    assert not again.replies  # the post is a room now: the link is just chat
-
-
-async def test_a_refused_link_is_explained(bot, game, monkeypatch):
-    record, thread = game
-
-    class Site:
-        async def room_status(self, _room):
-            raise RoomNotFound("room introuvable")
-
-    monkeypatch.setattr(type(bot), "webhost", property(lambda _self: Site()))
-    cog = bot.get_cog("partie")
-    message = FakeUserMessage(thread, content="https://archipelago.gg/room/nope")
-    await cog.on_message(message)
-    text = view_text(message.replies[0]["view"])
-    assert "Impossible de lire cette room" in text and "/track start" in text
-    assert bot.games.by_thread(thread.id) is record
-
-
 async def test_games_whose_post_was_deleted_offline_are_cancelled(bot, game):
     record, thread = game
     thread.parent.threads.remove(thread)
@@ -246,3 +208,94 @@ async def test_games_whose_post_was_deleted_offline_are_cancelled(bot, game):
     await bot.games.restore()
     assert bot.games.get(record.id) is None
     assert await bot.games.repo.open() == []
+
+
+async def test_links_in_the_post_do_not_start_tracking(bot, game):
+    record, thread = game
+    message = FakeUserMessage(thread, content="https://archipelago.gg/room/AbC-1")
+    await bot.get_cog("partie").on_message(message)
+    assert not message.replies and bot.games.by_thread(thread.id) is record
+
+
+async def test_editing_the_game(bot, game):
+    record, thread = game
+    cog = bot.get_cog("partie")
+    edit = {"nom": None, "debut": None, "description": None}
+    with pytest.raises(UserError, match="Seule la personne"):
+        await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)), **edit)
+    with pytest.raises(UserError, match="Précise l'heure"):
+        await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id), **{**edit, "debut": "samedi"})
+
+    await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id), **{**edit, "nom": "Dimanche", "debut": "-"})
+    assert thread.name == "Dimanche" and record.starts_at is None
+    panel = view_text(thread.messages[0].view)
+    assert "## Dimanche" in panel and ":F>" not in panel and "> Vocal ouvert" in panel
+    [stored] = await bot.games.repo.open()
+    assert stored.name == "Dimanche" and stored.starts_at is None
+
+    await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id), **{**edit, "debut": "01/01/2099 20h"})
+    assert record.starts_at == datetime(2099, 1, 1, 19, tzinfo=ZoneInfo("UTC"))
+    assert (await bot.games.repo.open())[0].starts_at == record.starts_at
+
+
+async def test_start_suggestions(bot, game):
+    cog = bot.get_cog("partie")
+    [choice] = await cog.start_autocomplete(FakeInteraction(), "12/10/2099 21h")
+    assert choice.name == choice.value == "lundi 12/10/2099 à 21:00"
+    assert len(await cog.start_autocomplete(FakeInteraction(), "")) == 4
+    with pytest.raises(UserError, match="déjà passée"):
+        await new_game(bot, game[1].parent.guild, debut="01/01/2020 21h")
+
+
+def buttons_of(view) -> dict:
+    return {b.label: b for b in view.walk_children() if isinstance(b, discord.ui.Button)}
+
+
+async def test_cancelling_a_game(bot, game):
+    _, thread = game
+    cog = bot.get_cog("partie")
+    with pytest.raises(UserError, match="Seule la personne"):
+        await cog.cancel.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)))
+
+    interaction = FakeInteraction(channel_id=thread.id)
+    await cog.cancel.callback(cog, interaction)
+    buttons = buttons_of(interaction.response.sent[0]["view"])
+    assert list(buttons) == ["Annuler la partie", "Garder la partie"]
+    await buttons["Annuler la partie"].callback(interaction)
+    assert "Partie annulée" in view_text(interaction.edited[0]["view"])
+
+    panel = thread.messages[0].view
+    assert "Partie annulée" in view_text(panel) and "Comment participer" not in view_text(panel)
+    assert not [i for i in panel.walk_children() if isinstance(i, discord.ui.DynamicItem)]
+    assert [t.name for t in thread.applied_tags] == ["Annulée"]
+    assert bot.games.by_thread(thread.id) is None and await bot.games.repo.open() == []
+    with pytest.raises(UserError, match="partie en inscriptions"):
+        await cog.cancel.callback(cog, FakeInteraction(channel_id=thread.id))
+
+
+@requires_ap_server
+async def test_back_to_signup_after_a_wrong_start(bot, game, ap_server):
+    record, thread = game
+    await bot.games.upload(record, 1, [FakeAttachment("p1.yaml", (DEV_DIR / "players" / "p1.yaml").read_bytes())])
+    track = bot.get_cog("track")
+    start = {"lien": ap_server.address, "slot": "Carol", "mot_de_passe": None, "nom": None}
+    await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
+    runtime = bot.rooms.by_thread(thread.id)
+
+    interaction = FakeInteraction(channel_id=thread.id)
+    await track.stop.callback(track, interaction)
+    buttons = buttons_of(interaction.response.sent[0]["view"])
+    assert list(buttons) == ["Arrêter et publier le récap", "Arrêter sans récap", "Revenir aux inscriptions", "Annuler"]
+    await buttons["Revenir aux inscriptions"].callback(interaction)
+    assert "Retour aux inscriptions" in view_text(interaction.edited[0]["view"])
+
+    assert bot.rooms.by_thread(thread.id) is None and await bot.rooms.repo.get(runtime.record.id) is None
+    reopened = bot.games.by_thread(thread.id)
+    assert reopened.id == record.id and reopened.status == "open"
+    assert [t.name for t in thread.applied_tags] == ["Inscriptions"]
+    panel = view_text(thread.messages[0].view)
+    assert "Comment participer" in panel and "**Alice** · *Celeste 64* · <@1>" in panel
+    assert "retour aux inscriptions" in thread.messages[-1].text
+
+    await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
+    assert bot.rooms.by_thread(thread.id).claims == {1: 1}

@@ -26,7 +26,7 @@ from ..storage.claims import ClaimRepo, NotifMode, NotifPrefs
 from ..storage.history import HistoryRepo
 from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
 from .emojis import E
-from .forum import TAG_SPECS, Post, RoomTag
+from .forum import TAG_SPECS, Post, RoomTag, ensure_room_tags
 from .panel_buttons import ClaimButton, MyHintsButton, SettingsButton
 from .render.feed import feed_view
 from .render.panel import panel_view
@@ -119,9 +119,8 @@ class ThreadSink:
         if thread.parent is None or thread.parent.type != discord.ChannelType.forum:
             return
         ours = {name for name, _ in TAG_SPECS.values()}
-        wanted = TAG_SPECS[tag][0]
-        tags = [t for t in thread.applied_tags if t.name not in ours]
-        tags += [t for t in thread.parent.available_tags if t.name == wanted]
+        wanted = (await ensure_room_tags(thread.parent))[tag]  # type: ignore[arg-type]
+        tags = [t for t in thread.applied_tags if t.name not in ours] + [wanted]
         if {t.id for t in tags} != {t.id for t in thread.applied_tags}:
             await thread.edit(applied_tags=tags[:5])
 
@@ -503,6 +502,14 @@ class RoomManager:
             await runtime.sink.set_tag(RoomTag.FINISHED)
         except discord.HTTPException:
             log.warning("Could not finalize the post of room %s", runtime.record.id, exc_info=True)
+
+    async def discard(self, runtime: RoomRuntime) -> bool:
+        """Stop a room and forget it was ever tracked (wrong link, game generated again)."""
+        if self._rooms.get(runtime.record.id) is not runtime:
+            return False
+        await self._detach(runtime)
+        await self.repo.delete(runtime.record)
+        return True
 
     async def shutdown(self) -> None:
         await asyncio.gather(*(self._detach(runtime) for runtime in list(self._rooms.values())))

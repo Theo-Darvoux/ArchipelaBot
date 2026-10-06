@@ -78,7 +78,9 @@ class FakeThread:
     async def fetch_message(self, message_id: int) -> FakeMessage:
         return self.get_partial_message(message_id)
 
-    async def edit(self, *, applied_tags=None, archived=None, **_kwargs) -> None:
+    async def edit(self, *, applied_tags=None, archived=None, name=None, **_kwargs) -> None:
+        if name is not None:
+            self.name = name
         if applied_tags is not None:
             self.applied_tags = list(applied_tags)
         if archived is not None:

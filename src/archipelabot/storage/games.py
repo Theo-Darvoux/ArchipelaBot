@@ -18,6 +18,7 @@ class GameRecord:
     name: str
     created_by: int
     description: str = ""
+    starts_at: datetime | None = None
     thread_id: int | None = None
     panel_message_id: int | None = None
     status: GameStatus = "open"
@@ -32,12 +33,14 @@ class GameRepo:
     async def create(self, game: GameRecord) -> GameRecord:
         cur = await self.db.conn.execute(
             """
-            INSERT INTO game (guild_id, thread_id, panel_message_id, name, description, status, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO game (guild_id, thread_id, panel_message_id, name, description, starts_at, status, created_by,
+                              created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                game.guild_id, game.thread_id, game.panel_message_id, game.name, game.description, game.status,
-                game.created_by, game.created_at.isoformat(),
+                game.guild_id, game.thread_id, game.panel_message_id, game.name, game.description,
+                game.starts_at and game.starts_at.isoformat(), game.status, game.created_by,
+                game.created_at.isoformat(),
             ),
         )  # fmt: skip
         await self.db.conn.commit()
@@ -45,7 +48,14 @@ class GameRepo:
         return game
 
     async def open(self) -> list[GameRecord]:
-        async with self.db.conn.execute("SELECT * FROM game WHERE status = 'open' ORDER BY id") as cur:
+        return await self._select("WHERE status = 'open' ORDER BY id")
+
+    async def started_in(self, thread_id: int) -> GameRecord | None:
+        rows = await self._select("WHERE status = 'started' AND thread_id = ?", thread_id)
+        return rows[0] if rows else None
+
+    async def _select(self, where: str, *params: object) -> list[GameRecord]:
+        async with self.db.conn.execute(f"SELECT * FROM game {where}", params) as cur:
             rows = await cur.fetchall()
         return [
             GameRecord(
@@ -55,6 +65,7 @@ class GameRepo:
                 panel_message_id=row["panel_message_id"],
                 name=row["name"],
                 description=row["description"],
+                starts_at=_parse_utc(row["starts_at"]) if row["starts_at"] else None,
                 status=row["status"],
                 created_by=row["created_by"],
                 created_at=_parse_utc(row["created_at"]),
@@ -66,6 +77,13 @@ class GameRepo:
         await self.db.conn.execute(
             "UPDATE game SET thread_id = ?, panel_message_id = ? WHERE id = ?",
             (game.thread_id, game.panel_message_id, game.id),
+        )
+        await self.db.conn.commit()
+
+    async def save_details(self, game: GameRecord) -> None:
+        await self.db.conn.execute(
+            "UPDATE game SET name = ?, description = ?, starts_at = ? WHERE id = ?",
+            (game.name, game.description, game.starts_at and game.starts_at.isoformat(), game.id),
         )
         await self.db.conn.commit()
 

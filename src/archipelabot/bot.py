@@ -149,6 +149,15 @@ class ArchipelaBot(commands.Bot):
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%d guilds)", self.user, len(self.guilds))
 
+    async def on_message(self, message: discord.Message) -> None:
+        if message.type == discord.MessageType.pins_add and self.user and message.author.id == self.user.id:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                log.warning("Could not delete the pin notice in %s", message.channel.id, exc_info=True)
+            return
+        await self.process_commands(message)
+
     async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
         self.rooms.thread_deleted(payload.thread_id)
         self.games.thread_deleted(payload.thread_id)

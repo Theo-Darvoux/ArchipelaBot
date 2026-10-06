@@ -49,6 +49,7 @@ FALLBACKS: dict[str, str] = {
     "yaml": "📄",
     "zip": "📦",
     "random": "🎲",
+    "calendar": "📅",
 }
 
 

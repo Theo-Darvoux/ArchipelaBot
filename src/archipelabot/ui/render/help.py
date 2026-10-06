@@ -16,10 +16,12 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
     start = (
         "### Pour commencer\n"
         f"**1.** Un admin choisit le salon forum avec {cmd('config forum')} (une seule fois).\n"
-        f"**2.** Quelqu'un annonce la partie avec {cmd('partie nouvelle')} : le bot crée son post dans le forum. "
+        f"**2.** Quelqu'un annonce la partie avec {cmd('partie nouvelle')} (nom, date de début, infos) : le bot crée "
+        f"son post dans le forum ; {cmd('partie modifier')} pour changer ces infos, {cmd('partie annuler')} pour "
+        "l'annuler. "
         f"Chacun y envoie son yaml ({E.yaml} **Mon yaml**, ou en déposant le fichier dans le post), et "
         f"{E.zip} **Tous les yamls** donne le zip pour générer.\n"
-        "**3.** Une fois la partie générée, colle le lien de la room (`archipelago.gg/room/…`) dans le post : "
+        f"**3.** Une fois la partie générée, lance {cmd('track start')} dans ce post avec le lien de la room : "
         "le suivi démarre et chacun est relié à son slot d'après son yaml.\n"
         f"-# Sans inscriptions : {cmd('track start')} avec le lien de la room crée directement le post, et chacun "
         f"clique sur {E.claim} **Je joue**."
@@ -32,7 +34,7 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
         f"{cmd('track reglages')} : choisir ce qui s'affiche dans le fil\n"
         f"{cmd('track reconnect')} : relancer la connexion (ou changer le mot de passe)\n"
         f"{cmd('recap')} : publier le récap (podium, chiffres, graphique), même après l'arrêt\n"
-        f"{cmd('track stop')} : arrêter le suivi\n"
+        f"{cmd('track stop')} : arrêter le suivi, ou revenir aux inscriptions après un mauvais lien\n"
         "-# Réglages, reconnexion, récap et arrêt : la personne qui a lancé le suivi ou un modérateur."
     )
     notifs = (

@@ -9,6 +9,7 @@ class RoomTag(StrEnum):
     ACTIVE = "active"
     ASLEEP = "asleep"
     FINISHED = "finished"
+    CANCELLED = "cancelled"
 
 
 class Post(Protocol):
@@ -22,6 +23,7 @@ TAG_SPECS: dict[RoomTag, tuple[str, str]] = {
     RoomTag.ACTIVE: ("En cours", "🟢"),
     RoomTag.ASLEEP: ("Endormie", "💤"),
     RoomTag.FINISHED: ("Terminée", "🏁"),
+    RoomTag.CANCELLED: ("Annulée", "❌"),
 }
 
 # What the bot needs in the forum to create and maintain room posts.

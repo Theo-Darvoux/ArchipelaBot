@@ -112,6 +112,9 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX game_yaml_game ON game_yaml (game_id);
     """,
+    """
+    ALTER TABLE game ADD COLUMN starts_at TEXT;
+    """,
 ]
 
 

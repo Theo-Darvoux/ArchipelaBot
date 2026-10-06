@@ -96,6 +96,10 @@ class RoomRepo:
         room.ended_at = datetime.now(UTC).replace(microsecond=0) if status != "active" else None
         await self._update(room, "status = ?, ended_at = ?", status, room.ended_at and room.ended_at.isoformat())
 
+    async def delete(self, room: RoomRecord) -> None:
+        await self.db.conn.execute("DELETE FROM room WHERE id = ?", (room.id,))
+        await self.db.conn.commit()
+
     async def _update(self, room: RoomRecord, assignments: str, *values: object) -> None:
         await self.db.conn.execute(f"UPDATE room SET {assignments} WHERE id = ?", (*values, room.id))
         await self.db.conn.commit()

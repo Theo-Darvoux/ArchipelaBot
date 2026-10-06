@@ -60,6 +60,7 @@ GLYPHS = {
     "yaml": ("description", USEFUL),
     "zip": ("folder_zip", GOLD),
     "random": ("casino", BLURPLE),
+    "calendar": ("calendar_month", LIGHT),
 }
 
 

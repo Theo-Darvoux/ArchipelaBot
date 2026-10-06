@@ -4,6 +4,7 @@ import io
 import logging
 import zipfile
 from collections.abc import AsyncGenerator, Sequence
+from datetime import datetime
 from pathlib import PurePath
 from typing import TYPE_CHECKING
 
@@ -62,7 +63,13 @@ class GameManager:
         files = await self.files(game) if files is None else files
         config = await self.bot.guild_configs.get(game.guild_id)
         buttons: list[ui.Item] = [YamlButton(game.id), YamlsZipButton(game.id)]
-        return signup_view(game, files, ping_role_id=config.ping_role_id, buttons=buttons)
+        return signup_view(
+            game,
+            files,
+            track_command=self.bot.command_mention("track start"),
+            ping_role_id=config.ping_role_id,
+            buttons=buttons,
+        )
 
     async def refresh(self, game: GameRecord) -> None:
         try:
@@ -74,8 +81,12 @@ class GameManager:
         except discord.HTTPException:
             log.warning("Could not update the panel of game %s", game.id, exc_info=True)
 
-    async def create(self, forum: discord.ForumChannel, name: str, description: str, user_id: int) -> GameRecord:
-        game = GameRecord(guild_id=forum.guild.id, name=name, description=description, created_by=user_id)
+    async def create(
+        self, forum: discord.ForumChannel, name: str, description: str, starts_at: datetime | None, user_id: int
+    ) -> GameRecord:
+        game = GameRecord(
+            guild_id=forum.guild.id, name=name, description=description, starts_at=starts_at, created_by=user_id
+        )
         await self.repo.create(game)
         assert game.id is not None
         config = await self.bot.guild_configs.get(game.guild_id)
@@ -102,6 +113,17 @@ class GameManager:
         except discord.HTTPException:
             log.warning("Could not pin the panel of game %s", game.id, exc_info=True)
         return game
+
+    async def edit(self, game: GameRecord, *, name: str, description: str, starts_at: datetime | None) -> None:
+        renamed = name != game.name
+        game.name, game.description, game.starts_at = name, description, starts_at
+        await self.repo.save_details(game)
+        if renamed:
+            try:
+                await (await ThreadSink(self.bot, game).thread()).edit(name=name)
+            except discord.HTTPException:
+                log.warning("Could not rename the post of game %s", game.id, exc_info=True)
+        await self.refresh(game)
 
     async def upload(self, game: GameRecord, user_id: int, attachments: Sequence[discord.Attachment]) -> list[Upload]:
         uploads = []
@@ -179,6 +201,30 @@ class GameManager:
             if slot not in runtime.claims:
                 await runtime.claim(slot, user)
         return list(dict.fromkeys(f.user_id for f in files))
+
+    async def cancel(self, game: GameRecord) -> bool:
+        async with self._lock:
+            if self._games.pop(game.id or 0, None) is None:
+                return False
+            await self.repo.set_status(game, "cancelled")
+        sink = ThreadSink(self.bot, game)
+        try:
+            await sink.edit_panel(await self.render(game))
+            await sink.set_tag(RoomTag.CANCELLED)
+        except discord.HTTPException:
+            log.warning("Could not update the post of cancelled game %s", game.id, exc_info=True)
+        return True
+
+    async def reopen(self, game: GameRecord) -> None:
+        """Back to sign-ups after its room was discarded: the yamls are still there."""
+        assert game.id is not None
+        await self.repo.set_status(game, "open")
+        self._games[game.id] = game
+        await self.refresh(game)
+        try:
+            await ThreadSink(self.bot, game).set_tag(RoomTag.SIGNUP)
+        except discord.HTTPException:
+            log.warning("Could not tag game %s", game.id, exc_info=True)
 
     def thread_deleted(self, thread_id: int) -> None:
         if game := self.by_thread(thread_id):

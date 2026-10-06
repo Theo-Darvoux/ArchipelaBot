@@ -25,11 +25,13 @@ les événements importants et le pont de chat.
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
 | `/config forum` · `recap` · `annonces` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre |
-| `/partie nouvelle [nom] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas) |
+| `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
+| `/partie annuler` | Dans le post d'une partie en inscriptions : l'annuler (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
+| `/partie modifier [nom] [debut] [description]` | Dans le post d'une partie en inscriptions : changer ses infos (`-` pour retirer la date ou la description). Réservé à qui l'a annoncée et aux modérateurs |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
 | `/track reglages` | Dans le post d'une room : choisir ce qui est affiché |
 | `/track reconnect [mot_de_passe]` | Dans le post d'une room : relancer la connexion tout de suite (par exemple après un refus du serveur), en changeant le mot de passe si besoin |
-| `/track stop` | Dans le post d'une room : arrêter le suivi, avec ou sans récap |
+| `/track stop` | Dans le post d'une room : arrêter le suivi, avec ou sans récap. Dans le post d'une partie, propose aussi de revenir aux inscriptions (mauvais lien, partie à regénérer) : le suivi est oublié, les yamls restent |
 | `/claim slot:<joueur>` · `/unclaim` | Dans le post d'une room : dire quel slot tu joues (ou bouton « Je joue » du panneau) |
 | `/status [joueur]` | Dans le post d'une room : progression détaillée d'un joueur (par défaut, le tien) |
 | `/hints [joueur]` | Dans le post d'une room : tes hints (ou ceux d'un joueur), visibles seulement par toi |
@@ -59,15 +61,18 @@ instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une 
 
 ## Une partie, un post
 
-1. `/partie nouvelle` crée le post avec le tag *Inscriptions* et pinge le rôle choisi avec `/config annonces`.
+1. `/partie nouvelle` crée le post avec le tag *Inscriptions* et pinge le rôle choisi avec `/config annonces`. La
+   date de début s'affiche à l'heure locale de chacun.
 2. Chacun envoie son yaml avec le bouton **Mon yaml** (plusieurs fichiers possibles) ou en le déposant dans le post.
    Le bot lit le nom du slot et le jeu, refuse un nom déjà pris par quelqu'un d'autre, et prévient si un nom dépasse
    16 caractères (Archipelago le coupe). Renvoyer un yaml pour le même slot remplace l'ancien. **Tous les yamls**
    donne un zip à mettre dans `Players/` pour générer.
-3. Quand la room est prête, n'importe qui colle son lien (`archipelago.gg/room/…`) dans le post : le panneau devient
-   celui de la room, le tag passe à *En cours*, chaque slot est attribué à qui a envoyé son yaml (les noms avec
-   `{number}` ou `{player}` quand il n'y a pas d'ambiguïté), et le bot pinge le rôle et les joueurs inscrits. Pour
-   une room avec mot de passe, utilise `/track start` dans le post.
+3. Quand la room est prête, lance `/track start` dans le post avec son lien : le panneau devient celui de la room,
+   le tag passe à *En cours*, chaque slot est attribué à qui a envoyé son yaml (les noms avec `{number}` ou
+   `{player}` quand il n'y a pas d'ambiguïté), et le bot pinge le rôle et les joueurs inscrits. Un lien collé dans
+   le post ne lance rien : pas de risque de suivre la mauvaise room.
+
+Le bot supprime le message « a épinglé un message » qui suit l'épinglage du panneau.
 
 ## Pont de chat
 

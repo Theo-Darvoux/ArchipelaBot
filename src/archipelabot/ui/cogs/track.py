@@ -96,14 +96,34 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             await self.bot.rooms.stop(runtime, "stopped")
             return f"{E.stopped} Suivi arrêté. Le post reste consultable."
 
-        view = ConfirmView(
+        async def back_to_signup() -> str:
+            if game is None or not await self.bot.rooms.discard(runtime):
+                return f"{E.stopped} Ce suivi est déjà arrêté."
+            await self.bot.games.reopen(game)
+            try:
+                text = f"{E.signup} Suivi annulé : retour aux inscriptions. Relance {start_command} avec le bon lien."
+                await runtime.sink.send_view(notice(text))
+            except discord.HTTPException:
+                log.warning("Could not announce the return to sign-ups of game %s", game.id, exc_info=True)
+            return f"{E.signup} Retour aux inscriptions : les yamls sont toujours là."
+
+        game = await self.bot.games.repo.started_in(runtime.record.thread_id or 0)
+        start_command = self.bot.command_mention("track start")
+        actions = [
+            ("Arrêter et publier le récap", discord.ButtonStyle.primary, stop_with_recap),
+            ("Arrêter sans récap", discord.ButtonStyle.danger, stop),
+        ]
+        question = (
             f"Arrêter le suivi de **{runtime.record.name}** ?\n-# Le post restera consultable, avec le tag "
-            f"{' '.join(TAG_SPECS[RoomTag.FINISHED][::-1])}.",
-            [
-                ("Arrêter et publier le récap", discord.ButtonStyle.primary, stop_with_recap),
-                ("Arrêter sans récap", discord.ButtonStyle.danger, stop),
-            ],
+            f"{' '.join(TAG_SPECS[RoomTag.FINISHED][::-1])}."
         )
+        if game is not None:
+            actions.append(("Revenir aux inscriptions", discord.ButtonStyle.secondary, back_to_signup))
+            question += (
+                "\n-# **Revenir aux inscriptions** : mauvais lien ou partie à regénérer. Le suivi est oublié (pas de "
+                f"récap), les yamls restent, et tu pourras relancer {start_command}."
+            )
+        view = ConfirmView(question, actions)
         await interaction.response.send_message(view=view, ephemeral=True)
 
     @app_commands.command(name="reconnect", description="Relancer tout de suite la connexion de cette room")

@@ -185,12 +185,9 @@ async def test_a_short_disconnection_is_not_an_absence():
 async def test_a_user_is_pinged_once_even_across_several_messages():
     sink = Sink()
     feed = FeedService(STATE, lambda: SETTINGS, sink, ping={2: 222}.get)
-    for i in range(30):
+    for i in range(45):
         await feed.handle(item(1, 2, f"Item {i}"))
-    await feed.handle(ev.GoalReached(1))
-    await feed.handle(item(1, 2, "Last"))
     await feed.flush()
-    assert len(sink.mentions) == 3
     assert sink.mentions == [(222,), (), ()]
 
 

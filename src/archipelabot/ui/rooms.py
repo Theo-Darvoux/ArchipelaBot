@@ -316,10 +316,12 @@ class RoomManager:
                 gone_since = None
                 return address
 
-            async def wake_webhost() -> None:
+            async def wake_webhost() -> bool:
                 runtime = self._rooms.get(record.id)
-                if runtime is None or runtime.worth_waking():
-                    await self.bot.webhost.wake(webhost)
+                if runtime is not None and not runtime.worth_waking():
+                    return False
+                await self.bot.webhost.wake(webhost)
+                return True
 
             resolve, wake = resolve_webhost, wake_webhost
 

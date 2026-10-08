@@ -8,7 +8,7 @@ from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.core import events as ev
 from archipelabot.core.chat import ChatRelay
 from archipelabot.core.progress import direct_baseline
-from archipelabot.core.room import WAKE_GRACE, RoomTracker
+from archipelabot.core.room import WAKE_ATTEMPTS, RoomTracker
 
 from .ap_server import APServer, requires_ap_server
 
@@ -166,6 +166,7 @@ async def test_wakes_a_sleeping_room():
     async def wake():
         nonlocal wakes
         wakes += 1
+        return True
 
     tracker, events = await start_tracker(server.address, retry_delays=(0.1,), resolve_address=resolve)
     tracker.wake = wake
@@ -187,6 +188,7 @@ async def test_asleep_when_waking_does_not_work():
     async def wake():
         nonlocal wakes
         wakes += 1
+        return True
 
     async def resolve():
         return None
@@ -195,7 +197,24 @@ async def test_asleep_when_waking_does_not_work():
     server.stop()
     try:
         await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.ASLEEP)
-        assert wakes >= WAKE_GRACE
+        assert wakes > WAKE_ATTEMPTS
+    finally:
+        await tracker.stop()
+
+
+async def test_asleep_at_once_when_left_asleep():
+    server = APServer()
+
+    async def wake():
+        return False
+
+    async def resolve():
+        return None
+
+    tracker, events = await start_tracker(server.address, retry_delays=(0.1,), resolve_address=resolve, wake=wake)
+    server.stop()
+    try:
+        await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.ASLEEP, 1)
     finally:
         await tracker.stop()
 

@@ -58,8 +58,8 @@ def signup_view(
 
     steps = (
         "### Comment participer\n"
-        f"**1.** Clique sur **{E.yaml} Mon yaml** pour envoyer ton fichier `.yaml`, ou glisse-le dans ce post. "
-        "Tu peux le remplacer ou le retirer tant que la partie n'a pas commencé.\n"
+        f"**1.** Clique sur le bouton **{E.yaml} Mon yaml** pour **envoyer**, **modifier**, ou **retirer** ton "
+        "fichier `.yaml` tant que la partie n'a pas commencé. Tu peux aussi le glisser dans ce post.\n"
         f"**2.** Quand tout le monde est inscrit, l'organisateur récupère **{E.zip} Tous les yamls** et génère "
         "la partie.\n"
         f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "

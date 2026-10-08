@@ -18,10 +18,11 @@ BULK_QUIET = 1.5
 NON_GAME_TAGS = frozenset({"TextOnly", "Tracker", "HintGame"})
 BRIDGE_PREFIX = "[Discord]"
 WAKE_GRACE = 2
+WAKE_ATTEMPTS = 5
 
 type Listener = Callable[[ev.Event], Awaitable[None]]
 type AddressResolver = Callable[[], Awaitable[str | None]]
-type Waker = Callable[[], Awaitable[None]]
+type Waker = Callable[[], Awaitable[bool]]  # False: the room is left asleep
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,13 +295,8 @@ class RoomTracker:
                     continue
                 if address is None:
                     asleep += 1
-                    if self.wake is None or asleep > WAKE_GRACE:
+                    if not await self._wake() or asleep > WAKE_ATTEMPTS:
                         await self._set_connection(ev.ConnectionState.ASLEEP)
-                    if self.wake:
-                        try:
-                            await self.wake()
-                        except Exception:
-                            log.warning("Could not wake %s", self.state.address, exc_info=True)
                     continue
                 self.state.address = address
             try:
@@ -319,6 +315,15 @@ class RoomTracker:
                 continue
             await self._set_connection(ev.ConnectionState.CONNECTED)
             return session
+
+    async def _wake(self) -> bool:
+        if self.wake is None:
+            return False
+        try:
+            return await self.wake()
+        except Exception:
+            log.warning("Could not wake %s", self.state.address, exc_info=True)
+            return True
 
     async def _consume(self, session: APSession) -> None:
         while True:

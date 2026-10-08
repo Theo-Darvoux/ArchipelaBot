@@ -209,6 +209,22 @@ async def test_feed_reports_only_sleep_and_address_changes():
     assert "endormie" in message and "nouveau lien · `archipelago.gg:41000`" in message
 
 
+async def test_sleep_is_told_once_until_something_happens():
+    sink = Sink()
+    feed = FeedService(STATE, lambda: SETTINGS, sink)
+    conn = lambda state: ev.ConnectionChanged(state, STATE.address)  # noqa: E731
+    for _ in range(3):  # the room is woken up and falls asleep again every couple of hours
+        await feed.handle(conn(ev.ConnectionState.ASLEEP))
+        await feed.handle(conn(ev.ConnectionState.CONNECTED))
+    await feed.flush()
+    assert len(sink.sent) == 1
+
+    await feed.handle(item())
+    await feed.handle(conn(ev.ConnectionState.ASLEEP))
+    await feed.flush()
+    assert "endormie" in sink.sent[-1]
+
+
 async def test_panel_edits_are_throttled_but_urgent_ones_go_fast():
     edits: list[int] = []
     counter = iter(range(100))

@@ -46,7 +46,7 @@ class BridgeCog(commands.Cog, name="bridge"):
             else:
                 await runtime.tracker.say(signed(message.author.display_name, text))
         except APConnectionError:
-            await self._react(message, "error")
+            log.debug("Room %s unreachable, message not relayed", runtime.record.id)
 
     async def _react(self, message: discord.Message, icon: str) -> None:
         try:

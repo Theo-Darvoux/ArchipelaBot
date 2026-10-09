@@ -150,7 +150,7 @@ async def test_bridge_while_disconnected(bot, room):
     runtime, thread, _ = room
     await runtime.tracker.stop()
     message = await say_on_discord(bot, thread, "personne ?")
-    assert message.reactions == ["❌"]
+    assert message.reactions == []
 
 
 @requires_ap_server

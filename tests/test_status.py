@@ -114,7 +114,7 @@ async def test_direct_rooms_resync_after_a_connection_loss_but_not_a_restart(bot
     # Known from the database before the room is even reached, without one connection per player.
     assert (restored.progress[3].done, restored.progress.total) == (2, total)
     await wait_until(lambda: restored.tracker.state.connection == ev.ConnectionState.CONNECTED)
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.2)
     assert syncs == 0
 
     # Checks made while the bot was cut off are only known by asking again.
@@ -141,6 +141,7 @@ async def test_settings_button_permissions(bot, room):
 
 async def test_releases_are_snapshotted_right_away(bot, room, ap_server):
     runtime, _, _ = room
+    runtime.tracker.bulk_quiet = 0.2
     before = len(await bot.rooms.history.snapshots(runtime.record.id))
     ap_server.command("/release Carol")
     await wait_until(lambda: runtime.progress[3].ratio == 1.0)

@@ -116,6 +116,13 @@ class WebhostClient:
     async def static_tracker(self, room: WebhostRoom, tracker_id: str) -> dict[str, Any]:
         return await self._get_json(f"{room.base_url}/api/static_tracker/{tracker_id}")
 
+    async def games(self, base_url: str) -> frozenset[str]:
+        """The games this WebHost can generate: those that ship with Archipelago, on archipelago.gg."""
+        data = await self._get_json(f"{base_url}/api/datapackage_checksum")
+        if not isinstance(data, dict):
+            raise WebhostError("réponse inattendue")
+        return frozenset(game for game in data if game != "Archipelago")
+
     async def wake(self, room: WebhostRoom) -> None:
         """Open the room page, which makes the WebHost start the room if it was asleep."""
         try:

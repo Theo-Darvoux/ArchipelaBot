@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import discord
 from discord import ui
 
+from ...core.apworlds import Apworld, Attached
 from ...core.yamls import PlayerYaml, YamlFile
 from ...storage.games import GameRecord
 from ..components import Tone
@@ -11,6 +12,7 @@ from ..emojis import E
 from .text import fit_lines, md, plural
 
 ROSTER_BUDGET = 3000
+INVALID_KEPT = "Il est gardé quand même, mais la génération échouera tant qu'il n'est pas corrigé."
 
 
 def player_label(player: PlayerYaml) -> str:
@@ -23,11 +25,33 @@ def game_label(player: PlayerYaml) -> str:
     return f"*{md(player.game)}*" if player.game else f"{E.random} *jeu aléatoire*"
 
 
+def apworld_label(apworld: Apworld) -> str:
+    version = f" v{md(apworld.version)}" if apworld.version else ""
+    return f"`{md(apworld.module)}`{version} · *{md(apworld.game)}*"
+
+
+def missing_text(game: str, in_library: bool) -> str:
+    text = f"{E.apworld} *{md(game)}* n'est pas un jeu officiel : il faut son `.apworld`."
+    if in_library:
+        return text + " Reprends celui déjà envoyé sur le serveur, ou envoie le tien."
+    return text + f" Envoie-le avec {E.yaml} **Mon yaml** ou dépose-le dans le post."
+
+
+def apworlds_section(apworlds: Sequence[Attached], missing: Sequence[str]) -> str:
+    lines = [f"{E.apworld} {apworld_label(a.apworld)} · <@{a.user_id}>" for a in apworlds]
+    lines += [f"⚠️ *{md(game)}* · apworld manquant" for game in missing]
+    return f"### {E.apworld} Apworlds\n" + "\n".join(lines)
+
+
 def signup_roster(files: Sequence[YamlFile]) -> str:
     lines = [
-        f"{E.yaml} {player_label(player)} · {game_label(player)} · <@{f.user_id}>"
+        line
         for f in files
-        for player in f.players
+        for line in (
+            [f"⚠️ `{md(f.filename)}` · *yaml invalide* · <@{f.user_id}>"]
+            if f.invalid
+            else [f"{E.yaml} {player_label(p)} · {game_label(p)} · <@{f.user_id}>" for p in f.players]
+        )
     ]
     return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres") or "*Personne pour l'instant.*"
 
@@ -39,6 +63,8 @@ def signup_view(
     track_command: str = "`/track start`",
     ping_role_id: int | None = None,
     buttons: list[ui.Item] | None = None,
+    apworlds: Sequence[Attached] = (),
+    missing: Sequence[str] = (),
 ) -> ui.LayoutView:
     header = f"## {md(game.name)}"
     if game.starts_at:
@@ -59,9 +85,10 @@ def signup_view(
     steps = (
         "### Comment participer\n"
         f"**1.** Clique sur le bouton **{E.yaml} Mon yaml** pour **envoyer**, **modifier**, ou **retirer** ton "
-        "fichier `.yaml` tant que la partie n'a pas commencé. Tu peux aussi le glisser dans ce post.\n"
-        f"**2.** Quand tout le monde est inscrit, l'organisateur récupère **{E.zip} Tous les yamls** et génère "
-        "la partie.\n"
+        "fichier `.yaml` tant que la partie n'a pas commencé. Tu peux aussi le glisser dans ce post. Si ton jeu "
+        "n'est pas officiel, ajoute son `.apworld` de la même façon.\n"
+        f"**2.** Quand tout le monde est inscrit, l'organisateur récupère **{E.zip} Tous les yamls** (avec les "
+        "apworlds) et génère la partie.\n"
         f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "
         "partie et chacun est relié à son slot."
     )
@@ -71,6 +98,7 @@ def signup_view(
             ui.TextDisplay(header),
             ui.Separator(),
             ui.TextDisplay(roster),
+            *([ui.Separator(), ui.TextDisplay(apworlds_section(apworlds, missing))] if apworlds or missing else []),
             *([] if cancelled else [ui.Separator(), ui.TextDisplay(steps)]),
             *([ui.Separator(), ui.ActionRow(*buttons)] if buttons and not cancelled else []),
             accent_colour=discord.Colour.dark_grey() if cancelled else Tone.INFO.value,
@@ -83,28 +111,38 @@ def signup_view(
 class Upload:
     filename: str
     players: list[PlayerYaml] = field(default_factory=list)
+    apworld: Apworld | None = None
     error: str | None = None
+    invalid: str | None = None
     warnings: list[str] = field(default_factory=list)
     replaced: list[str] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
-        return self.error is None and not self.warnings
+        return self.error is None and self.invalid is None and not self.warnings
 
 
 def upload_text(upload: Upload) -> str:
     if upload.error:
         return f"{E.error} **{md(upload.filename)}** : {upload.error}"
-    slots = ", ".join(f"{player_label(p)} · {game_label(p)}" for p in upload.players)
-    text = f"{E.yaml} **{md(upload.filename)}** : {slots}"
+    if upload.apworld:
+        text = f"{E.apworld} **{md(upload.filename)}** : apworld {apworld_label(upload.apworld)}"
+        if upload.replaced:
+            text += "\n-# Remplace " + ", ".join(f"`{md(label)}`" for label in upload.replaced)
+        return text
+    if upload.invalid:
+        text = f"{E.yaml} **{md(upload.filename)}** : ⚠️ {upload.invalid}\n-# {INVALID_KEPT}"
+    else:
+        slots = ", ".join(f"{player_label(p)} · {game_label(p)}" for p in upload.players)
+        text = f"{E.yaml} **{md(upload.filename)}** : {slots}"
     if upload.replaced:
         text += "\n-# Remplace " + ", ".join(f"`{md(name)}`" for name in upload.replaced)
     return text + "".join(f"\n-# ⚠️ {warning}" for warning in upload.warnings)
 
 
-def upload_report(uploads: Sequence[Upload]) -> ui.LayoutView:
+def upload_tone(uploads: Sequence[Upload], missing: Sequence[str]) -> Tone:
     failed = sum(u.error is not None for u in uploads)
-    tone = Tone.SUCCESS if not failed else Tone.ERROR if failed == len(uploads) else Tone.WARNING
-    view = ui.LayoutView()
-    view.add_item(ui.Container(ui.TextDisplay("\n".join(upload_text(u) for u in uploads)), accent_colour=tone.value))
-    return view
+    if uploads and failed == len(uploads):
+        return Tone.ERROR
+    invalid = any(u.invalid for u in uploads)
+    return Tone.WARNING if failed or invalid or missing else Tone.SUCCESS

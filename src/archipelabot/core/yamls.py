@@ -1,6 +1,7 @@
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import PurePath
 
 import yaml
 
@@ -15,6 +16,10 @@ Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
 class YamlError(Exception):
+    pass
+
+
+class YamlSyntaxError(YamlError):
     pass
 
 
@@ -51,6 +56,15 @@ class YamlFile:
     content: bytes
     players: list[PlayerYaml] = field(default_factory=list)
     id: int | None = None
+    invalid: str | None = None
+
+
+def read_yaml(user_id: int, filename: str, content: bytes, id: int | None = None) -> YamlFile:
+    """A syntax error doesn't block: the file is kept, without its slots, and `invalid` says what's wrong."""
+    try:
+        return YamlFile(user_id, filename, content, parse_players(content), id=id)
+    except YamlSyntaxError as e:
+        return YamlFile(user_id, filename, content, id=id, invalid=str(e))
 
 
 def is_yaml_filename(filename: str) -> bool:
@@ -67,12 +81,17 @@ def parse_players(content: bytes) -> list[PlayerYaml]:
     try:
         documents = [doc for doc in yaml.load_all(text, Loader=Loader) if doc is not None]
     except yaml.YAMLError as e:
-        mark = getattr(e, "problem_mark", None)
-        where = f" (ligne {mark.line + 1})" if mark else ""
-        raise YamlError(f"Ce n'est pas un yaml valide{where}.") from e
+        raise YamlSyntaxError(_syntax_error(e)) from e
     if not documents:
         raise YamlError("Le fichier est vide.")
     return [_player(doc) for doc in documents]
+
+
+def _syntax_error(error: yaml.YAMLError) -> str:
+    mark = getattr(error, "problem_mark", None)
+    problem = getattr(error, "problem", None) or str(error).splitlines()[0]
+    where = f" ligne {mark.line + 1}, colonne {mark.column + 1}" if mark else ""
+    return f"Yaml invalide{where} : `{problem}`"
 
 
 def _player(document: object) -> PlayerYaml:
@@ -130,3 +149,17 @@ def assign_slots(files: Iterable[YamlFile], players: Iterable[SlotInfo]) -> dict
         if len(users) == 1:
             claims[slot.slot] = users.pop()
     return claims
+
+
+def unique_filenames(filenames: Iterable[str]) -> list[str]:
+    used: set[str] = set()
+    names = []
+    for filename in filenames:
+        name, number = filename, 1
+        while name.casefold() in used:
+            number += 1
+            path = PurePath(filename)
+            name = f"{path.stem} ({number}){path.suffix}"
+        used.add(name.casefold())
+        names.append(name)
+    return names

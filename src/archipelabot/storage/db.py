@@ -115,6 +115,27 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE game ADD COLUMN starts_at TEXT;
     """,
+    """
+    CREATE TABLE apworld (
+        id          INTEGER PRIMARY KEY,
+        guild_id    INTEGER NOT NULL,
+        game        TEXT NOT NULL,
+        module      TEXT NOT NULL,      -- folder inside the zip, the file name Archipelago expects
+        version     TEXT NOT NULL,      -- world_version from its manifest, '' without one
+        sha256      TEXT NOT NULL,
+        uploaded_by INTEGER NOT NULL,
+        uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+        content     BLOB NOT NULL,
+        UNIQUE (guild_id, sha256)
+    );
+    CREATE INDEX apworld_game ON apworld (guild_id, game);
+    CREATE TABLE game_apworld (
+        game_id     INTEGER NOT NULL REFERENCES game (id) ON DELETE CASCADE,
+        apworld_id  INTEGER NOT NULL REFERENCES apworld (id) ON DELETE CASCADE,
+        user_id     INTEGER NOT NULL,
+        PRIMARY KEY (game_id, apworld_id)
+    );
+    """,
 ]
 
 

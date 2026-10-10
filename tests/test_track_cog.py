@@ -7,7 +7,7 @@ import discord
 import pytest
 
 from archipelabot.ap import protocol as p
-from archipelabot.ap.client import ConnectOptions, open_session
+from archipelabot.ap.client import APRefused, ConnectOptions, open_session
 from archipelabot.ap.webhost import RoomNotFound, WebhostRoom
 from archipelabot.core import events as ev
 from archipelabot.errors import UserError
@@ -15,7 +15,7 @@ from archipelabot.storage.guilds import GuildConfig
 from archipelabot.storage.rooms import RoomRecord
 from archipelabot.ui.rooms import RoomManager
 
-from .ap_server import APServer, requires_ap_server
+from .ap_server import fresh_server, requires_ap_server
 from .fakes import FakeForum, FakeGuild, FakeInteraction, FakeUser, view_text
 
 pytestmark = requires_ap_server
@@ -78,17 +78,6 @@ async def test_track_creates_post_and_posts_items(bot, discord_env, ap_server):
     feed = "\n".join(thread.texts())
     assert "Carol" in feed and "💬 **Carol** : coucou" in feed
     await carol.close()
-
-
-async def test_idle_rooms_are_left_asleep(bot, discord_env, ap_server):
-    guild, forum = discord_env
-    await track(bot, guild, lien=ap_server.address, slot="Alice")
-    runtime = bot.rooms.by_thread(forum.threads[0].id)
-    now = datetime.now(UTC)
-    runtime.progress_service.last_activity = now - timedelta(hours=23)
-    assert runtime.worth_waking(now)
-    runtime.progress_service.last_activity = now - timedelta(hours=25)
-    assert not runtime.worth_waking(now)
 
 
 async def test_stop_and_settings_from_the_post(bot, discord_env, ap_server):
@@ -218,6 +207,10 @@ async def test_rooms_idle_for_a_week_are_stopped(bot, discord_env, ap_server):
     [thread] = forum.threads
     runtime = bot.rooms.by_thread(thread.id)
     now = datetime.now(UTC)
+    runtime.progress_service.last_activity = now - timedelta(hours=23)
+    assert runtime.worth_waking(now)
+    runtime.progress_service.last_activity = now - timedelta(hours=25)
+    assert not runtime.worth_waking(now)
     runtime.progress_service.last_activity = now - timedelta(days=6)
     assert not runtime.abandoned(now)
     runtime.progress_service.last_activity = now - timedelta(days=8)
@@ -274,7 +267,7 @@ async def test_events_while_the_post_is_created_are_posted(bot, discord_env, ap_
 
     async def slow_create_thread(**kwargs):
         await carol.send(p.say_packet("je suis déjà là"))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.2)
         return await create_thread(**kwargs)
 
     forum.create_thread = slow_create_thread
@@ -292,37 +285,48 @@ async def test_events_while_the_post_is_created_are_posted(bot, discord_env, ap_
     await carol.close()
 
 
-async def test_reconnect_with_a_new_password(bot, discord_env):
-    guild, forum = discord_env
-    server = APServer(password="vieux")
-    try:
-        await track(bot, guild, lien=server.address, slot="Alice", mot_de_passe="vieux")
-        [thread] = forum.threads
-        runtime = bot.rooms.by_thread(thread.id)
-        await wait_until(lambda: runtime.progress.total is not None)
-        server.stop()
-        server = APServer(password="neuf", port=server.port)
-        await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.FAILED, wait=20)
-        await runtime.feed.flush()
-        assert any("`/track reconnect`" in t for t in thread.texts())
+async def set_password(server, password: str) -> None:
+    server.command(f"/option password {password}")
+    async with asyncio.timeout(5):
+        while True:
+            options = ConnectOptions(slot="Bob", password=f"pas {password}", tags=("Tracker",))
+            try:
+                session = await open_session(server.address, options)
+            except APRefused:
+                return
+            await session.close()
+            await asyncio.sleep(0.05)
 
-        cog = bot.get_cog("track")
-        with pytest.raises(UserError, match="Seule la personne"):
-            await cog.reconnect.callback(
-                cog, FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(id=5)), mot_de_passe="neuf"
-            )
-        interaction = FakeInteraction(guild=guild, channel_id=thread.id)
-        await cog.reconnect.callback(cog, interaction, mot_de_passe="neuf")
-        assert "Reconnexion lancée" in view_text(interaction.followup.sent[0]["view"])
-        await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
-        assert (await bot.rooms.repo.get(runtime.record.id)).password == "neuf"
-    finally:
-        server.stop()
+
+async def test_reconnect_with_a_new_password(bot, discord_env, ap_server):
+    guild, forum = discord_env
+    await set_password(ap_server, "vieux")
+    await track(bot, guild, lien=ap_server.address, slot="Alice", mot_de_passe="vieux")
+    [thread] = forum.threads
+    runtime = bot.rooms.by_thread(thread.id)
+    runtime.tracker.retry_delays = (0.1,)
+    await wait_until(lambda: runtime.progress.total is not None)
+    await set_password(ap_server, "neuf")
+    await runtime.tracker._session.ws.close()
+    await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.FAILED)
+    await runtime.feed.flush()
+    assert any("`/track reconnect`" in t for t in thread.texts())
+
+    cog = bot.get_cog("track")
+    with pytest.raises(UserError, match="Seule la personne"):
+        await cog.reconnect.callback(
+            cog, FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(id=5)), mot_de_passe="neuf"
+        )
+    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
+    await cog.reconnect.callback(cog, interaction, mot_de_passe="neuf")
+    assert "Reconnexion lancée" in view_text(interaction.followup.sent[0]["view"])
+    await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
+    assert (await bot.rooms.repo.get(runtime.record.id)).password == "neuf"
 
 
 async def test_rooms_down_for_a_week_are_abandoned(bot, discord_env):
     guild, forum = discord_env
-    server = APServer()
+    server = fresh_server()
     await track(bot, guild, lien=server.address, slot="Alice")
     [thread] = forum.threads
     runtime = bot.rooms.by_thread(thread.id)

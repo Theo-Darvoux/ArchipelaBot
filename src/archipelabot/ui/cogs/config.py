@@ -62,7 +62,7 @@ class ConfigCog(
         config.ping_role_id = role.id if role else None
         await self.bot.guild_configs.save(config)
         text = (
-            f"{role.mention} sera pingé à l'annonce d'une partie et à l'ouverture de sa room."
+            f"{role.mention} sera pingé à l'annonce d'une partie."
             if role
             else "Personne ne sera pingé à l'annonce d'une partie."
         )

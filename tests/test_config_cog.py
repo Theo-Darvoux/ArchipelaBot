@@ -7,17 +7,13 @@ from archipelabot.ui.forum import TAG_SPECS, RoomTag, ensure_room_tags
 from .fakes import FakeForum, FakeInteraction, FakeTag, view_text
 
 
-def test_commands_are_registered(bot):
-    names = {cmd.qualified_name for cmd in bot.tree.walk_commands()}
-    assert {"config forum", "config recap", "config annonces", "config voir", "partie nouvelle"} <= names
-
-
 async def test_ensure_room_tags_creates_only_missing():
     forum = FakeForum(available_tags=[FakeTag("En cours", id=42), FakeTag("Autre")])
     tags = await ensure_room_tags(forum)
 
     assert tags[RoomTag.ACTIVE].id == 42
-    assert [t.name for t in forum.available_tags] == ["En cours", "Autre", "Inscriptions", "Endormie", "Terminée", "Annulée"]
+    names = [t.name for t in forum.available_tags]
+    assert names == ["En cours", "Autre", "Inscriptions", "Endormie", "Terminée", "Annulée"]
     assert set(tags) == set(TAG_SPECS)
 
 

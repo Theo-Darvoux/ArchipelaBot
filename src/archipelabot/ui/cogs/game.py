@@ -8,14 +8,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from ...core.schedule import ScheduleError, label, parse_start, suggestions
-from ...core.yamls import is_yaml_filename
 from ...errors import UserError
 from ...storage.games import GameRecord
 from ..components import Tone, notice
 from ..emojis import E
 from ..forum import TAG_SPECS, RoomTag
-from ..render.signup import upload_report
+from ..games import is_signup_file
 from ..render.text import md
+from ..signup_buttons import UploadReport
 from ..types import Interaction
 from ..views import ConfirmView
 
@@ -141,18 +141,20 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
         if message.author.bot or message.guild is None:
             return
         game = self.bot.games.by_thread(message.channel.id)
-        if game is not None and (yamls := [a for a in message.attachments if is_yaml_filename(a.filename)]):
-            await self._yamls(game, message, yamls)
+        if game is not None and (files := [a for a in message.attachments if is_signup_file(a.filename)]):
+            await self._files(game, message, files)
 
-    async def _yamls(self, game: GameRecord, message: discord.Message, attachments: list[discord.Attachment]) -> None:
-        uploads = await self.bot.games.upload(game, message.author.id, attachments)
+    async def _files(self, game: GameRecord, message: discord.Message, attachments: list[discord.Attachment]) -> None:
+        games = self.bot.games
+        uploads = await games.upload(game, message.author.id, attachments)
+        report = await UploadReport.create(games, game, message.author.id, uploads)
         try:
-            if all(u.clean for u in uploads):
+            if all(u.clean for u in uploads) and not report.needs_answer:
                 await message.add_reaction("✅")
             else:
-                await message.reply(view=upload_report(uploads), mention_author=False)
+                await message.reply(view=report, mention_author=False)
         except discord.HTTPException:
-            log.warning("Could not answer a yaml upload in game %s", game.id, exc_info=True)
+            log.warning("Could not answer an upload in game %s", game.id, exc_info=True)
 
 
 async def setup(bot: "ArchipelaBot") -> None:

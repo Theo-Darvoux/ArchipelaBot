@@ -1,8 +1,11 @@
 """Runs a real Archipelago MultiServer for integration tests (see scripts/setup-dev-server.sh)."""
 
+import atexit
+import os
 import socket
 import subprocess
 import time
+from collections import deque
 from pathlib import Path
 
 import pytest
@@ -10,6 +13,7 @@ import pytest
 DEV_DIR = Path(__file__).parents[1] / ".dev"
 AP_DIR = DEV_DIR / "Archipelago"
 SEEDS = sorted((DEV_DIR / "seeds").glob("AP_*.zip"))
+SPARES = max(2, (os.cpu_count() or 4) // 2)
 
 requires_ap_server = pytest.mark.skipif(
     not (AP_DIR / ".venv").exists() or not SEEDS, reason="run scripts/setup-dev-server.sh first"
@@ -31,12 +35,12 @@ def wait_for_port(port: int, process: subprocess.Popen, timeout: float = 30) -> 
             with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                 return
         except OSError:
-            time.sleep(0.1)
+            time.sleep(0.05)
     raise TimeoutError("MultiServer did not start")
 
 
 class APServer:
-    def __init__(self, password: str | None = None, port: int | None = None) -> None:
+    def __init__(self, password: str | None = None, port: int | None = None, *, wait: bool = True) -> None:
         self.port = port or free_port()
         args = [
             str(AP_DIR / ".venv" / "bin" / "python"), "MultiServer.py", str(SEEDS[-1]),
@@ -48,6 +52,10 @@ class APServer:
         self.process = subprocess.Popen(
             args, cwd=AP_DIR, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
+        if wait:
+            self.wait()
+
+    def wait(self) -> None:
         wait_for_port(self.port, self.process)
 
     @property
@@ -65,8 +73,26 @@ class APServer:
             self.process.wait(10)
 
 
+_spares: deque[APServer] = deque()
+
+
+def fresh_server() -> APServer:
+    """An unused server. Starting one takes seconds, so the next ones are started in the background."""
+    while len(_spares) <= SPARES:
+        _spares.append(APServer(wait=False))
+    server = _spares.popleft()
+    server.wait()
+    return server
+
+
+@atexit.register
+def _stop_spares() -> None:
+    while _spares:
+        _spares.pop().stop()
+
+
 @pytest.fixture
 def ap_server():
-    server = APServer()
+    server = fresh_server()
     yield server
     server.stop()

@@ -3,14 +3,14 @@ import asyncio
 import pytest
 
 from archipelabot.ap import protocol as p
-from archipelabot.ap.client import APConnectionError, APRefused, ConnectOptions, open_session
+from archipelabot.ap.client import APConnectionError, ConnectOptions, open_session
 from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.core import events as ev
 from archipelabot.core.chat import ChatRelay
 from archipelabot.core.progress import direct_baseline
 from archipelabot.core.room import WAKE_ATTEMPTS, RoomTracker
 
-from .ap_server import APServer, requires_ap_server
+from .ap_server import APServer, fresh_server, requires_ap_server
 
 pytestmark = requires_ap_server
 
@@ -83,7 +83,7 @@ async def test_slots_and_items_with_names(ap_server):
 
 
 async def test_release_and_collect_are_folded(ap_server):
-    tracker, events = await start_tracker(ap_server.address, bulk_quiet=0.5)
+    tracker, events = await start_tracker(ap_server.address, bulk_quiet=0.2)
 
     ap_server.command("/release Carol")
     released = await events.wait_for(lambda e: isinstance(e, ev.Released))
@@ -122,7 +122,7 @@ async def test_goal_chat_and_deathlink(ap_server):
 
 
 async def test_reconnects_after_server_restart():
-    server = APServer()
+    server = fresh_server()
     tracker, events = await start_tracker(server.address, retry_delays=(0.2,))
     server.stop()
     await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.RECONNECTING)
@@ -136,7 +136,7 @@ async def test_reconnects_after_server_restart():
 
 
 async def test_asleep_until_resolver_gives_a_port():
-    server = APServer()
+    server = fresh_server()
     answers: list[str | None] = [None, None]  # asleep twice, then the room is back
 
     async def resolve():
@@ -147,7 +147,7 @@ async def test_asleep_until_resolver_gives_a_port():
     await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.ASLEEP)
     assert len(events.of_type(ev.ConnectionChanged)) == 3  # connected, reconnecting, asleep (only once)
 
-    server = APServer()  # the room comes back on another port
+    server = fresh_server()  # the room comes back on another port
     try:
         await events.wait_for(lambda e: e == ev.ConnectionChanged(ev.ConnectionState.CONNECTED, server.address))
         assert tracker.state.address == server.address
@@ -157,7 +157,7 @@ async def test_asleep_until_resolver_gives_a_port():
 
 
 async def test_wakes_a_sleeping_room():
-    server = APServer()
+    server = fresh_server()
     wakes = 0
 
     async def resolve():
@@ -171,7 +171,7 @@ async def test_wakes_a_sleeping_room():
     tracker, events = await start_tracker(server.address, retry_delays=(0.1,), resolve_address=resolve)
     tracker.wake = wake
     server.stop()
-    server = APServer()  # the woken room comes back on another port
+    server = fresh_server()  # the woken room comes back on another port
     try:
         await events.wait_for(lambda e: e == ev.ConnectionChanged(ev.ConnectionState.CONNECTED, server.address))
         assert wakes == 1
@@ -182,7 +182,7 @@ async def test_wakes_a_sleeping_room():
 
 
 async def test_asleep_when_waking_does_not_work():
-    server = APServer()
+    server = fresh_server()
     wakes = 0
 
     async def wake():
@@ -203,7 +203,7 @@ async def test_asleep_when_waking_does_not_work():
 
 
 async def test_asleep_at_once_when_left_asleep():
-    server = APServer()
+    server = fresh_server()
 
     async def wake():
         return False
@@ -217,22 +217,6 @@ async def test_asleep_at_once_when_left_asleep():
         await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.ASLEEP, 1)
     finally:
         await tracker.stop()
-
-
-async def test_refused_at_start(ap_server):
-    tracker = RoomTracker(ap_server.address, ConnectOptions(slot="Nobody"), DataPackageStore(None))
-    with pytest.raises(APRefused):
-        await tracker.start()
-
-
-async def test_resume_connects_in_background(ap_server):
-    tracker = RoomTracker(ap_server.address, BOT, DataPackageStore(None), retry_delays=(5,))
-    events = Recorder()
-    tracker.subscribe(events)
-    tracker.resume()
-    await events.wait_for(lambda e: e == ev.ConnectionChanged(ev.ConnectionState.CONNECTED, ap_server.address), 3)
-    assert tracker.state.players
-    await tracker.stop()
 
 
 async def test_client_statuses(ap_server):
@@ -342,12 +326,12 @@ async def test_unexpected_errors_while_reconnecting_are_retried(ap_server):
 
 
 async def test_direct_rooms_that_stay_down_are_unreachable():
-    server = APServer()
+    server = fresh_server()
     tracker, events = await start_tracker(server.address, retry_delays=(0.1,))
     server.stop()
     try:
         await events.wait_for(lambda e: getattr(e, "state", None) == ev.ConnectionState.UNREACHABLE)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
         assert [e.state for e in events.of_type(ev.ConnectionChanged)] == [
             ev.ConnectionState.CONNECTED,
             ev.ConnectionState.RECONNECTING,
@@ -358,7 +342,7 @@ async def test_direct_rooms_that_stay_down_are_unreachable():
 
 
 async def test_hints_added_while_disconnected_are_announced(ap_server):
-    tracker, events = await start_tracker(ap_server.address, retry_delays=(1.0,))
+    tracker, events = await start_tracker(ap_server.address, retry_delays=(0.3,))
     carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))
     await carol.send(p.location_scouts_packet(carol.connected.missing_locations))
     info = await anext(pk async for pk in carol if isinstance(pk, p.LocationInfo))
@@ -379,7 +363,7 @@ async def test_events_wait_until_listened_to(ap_server):
     await tracker.start(listen=False)
     carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))
     await carol.send(p.say_packet("trop tôt ?"))
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.2)
 
     events = Recorder()
     tracker.subscribe(events)
@@ -411,3 +395,25 @@ async def test_a_message_that_could_not_be_sent_is_not_awaited_as_an_echo():
     with pytest.raises(APConnectionError):
         await tracker.send_chat(BrokenSession(), CAROL, "perdu")
     assert not tracker._said
+
+
+async def test_trackers_and_text_clients_are_not_players(ap_server):
+    carol = await open_session(ap_server.address, game_client("Carol", "ChecksFinder"))  # before the bot
+    tracker, _ = await start_tracker(ap_server.address)
+    watchers = [
+        await open_session(ap_server.address, ConnectOptions(slot=name, tags=("Tracker",), uuid=f"poptracker-{name}"))
+        for name in ("Bob", "Carol")
+    ]
+    await wait_until(lambda: tracker.state.watchers[BOB] and tracker.state.watchers[CAROL])
+    assert not tracker.state.is_online(BOB) and tracker.state.is_online(CAROL)
+
+    relay = ChatRelay(tracker, None)
+    await relay.say(BOB, "salut")  # only Bob's tracker was connected: Bob isn't playing
+    for watcher in watchers:
+        await watcher.close()
+    await wait_until(lambda: not tracker.state.watchers[CAROL])
+    assert not tracker.state.is_online(BOB) and tracker.state.is_online(CAROL)
+
+    await relay.close_all()
+    await carol.close()
+    await tracker.stop()

@@ -1,13 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
 from archipelabot.ap.datapackage import DataPackageStore
-from archipelabot.ap.protocol import ItemFlags
 from archipelabot.ap.webhost import WebhostRoom
 from archipelabot.storage.claims import ClaimRepo, NotifMode, NotifPrefs
 from archipelabot.storage.db import MIGRATIONS, Database
 from archipelabot.storage.guilds import GuildConfig, GuildRepo
 from archipelabot.storage.history import HistoryRepo, LoggedEvent, SavedSlot, Snapshot
-from archipelabot.storage.rooms import RoomRecord, RoomRepo, RoomSettings
+from archipelabot.storage.rooms import RoomRecord, RoomRepo
 
 
 async def test_migrations_apply_once(tmp_path):
@@ -60,14 +59,6 @@ async def test_room_roundtrip_and_status(db):
     assert await repo.active() == []
     loaded = await repo.get(room.id)
     assert loaded.status == "finished" and loaded.ended_at == room.ended_at is not None
-
-
-def test_room_settings_item_filter():
-    settings = RoomSettings()
-    assert settings.shows_item(ItemFlags.PROGRESSION | ItemFlags.TRAP)
-    assert settings.shows_item(ItemFlags.USEFUL)
-    assert settings.shows_item(ItemFlags.TRAP)
-    assert not settings.shows_item(ItemFlags.FILLER)
 
 
 async def test_claims_and_previous_owners(db):

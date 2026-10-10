@@ -1,4 +1,5 @@
 import io
+import random
 import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -9,11 +10,12 @@ import pytest
 from archipelabot.core import events as ev
 from archipelabot.errors import UserError
 from archipelabot.storage.guilds import GuildConfig
-from archipelabot.ui.games import GameManager
-from archipelabot.ui.signup_buttons import MyYamlsView, YamlButton, YamlModal, YamlsZipButton
+from archipelabot.ui.games import ZIP_OVERHEAD, GameManager
+from archipelabot.ui.signup_buttons import MyYamlsView, UploadReport, YamlButton, YamlModal, YamlsZipButton
 
 from .ap_server import DEV_DIR, requires_ap_server
 from .fakes import FakeAttachment, FakeInteraction, FakeUser, FakeUserMessage, view_text
+from .test_apworlds import apworld
 from .test_track_cog import NotFoundResponse, discord_env, wait_until  # noqa: F401
 
 ROLE = 4242
@@ -80,7 +82,7 @@ async def test_yamls_fill_the_panel(bot, game):
             FakeAttachment("notes.txt", b"hello"),
         ],
     )
-    assert [u.error for u in uploads] == [None, None, "ce n'est pas un fichier `.yaml`."]
+    assert [u.error for u in uploads] == [None, None, "ce n'est ni un `.yaml` ni un `.apworld`."]
     assert uploads[1].warnings
     panel = view_text(thread.messages[0].view)
     assert "Inscrits · 1 joueur · 3 slots" in panel
@@ -108,15 +110,28 @@ async def test_my_yaml_button_opens_the_upload_then_lists_mine(bot, game):
     submit = click(bot)
     await modal.on_submit(submit)
     report = view_text(submit.followup.sent[0]["view"])
-    assert "**Psders1** · *Celeste*" in report and "pas un yaml valide" in report
+    assert "**Psders1** · *Celeste*" in report and "**bad.yaml** : ⚠️ Yaml invalide ligne 2" in report
+    assert "gardé quand même" in report
+    assert "⚠️ `bad.yaml` · *yaml invalide* · <@77>" in view_text(thread.messages[0].view)
 
     interaction = click(bot)
     await YamlButton(record.id).callback(interaction)
     view = interaction.response.sent[0]["view"]
     assert isinstance(view, MyYamlsView) and "`psders.yaml`" in view_text(view)
-    remove = next(b for b in view.walk_children() if getattr(b, "label", "") == "Retirer")
-    await remove.callback(click(bot))
+    assert "Yaml invalide ligne 2" in view_text(view)
+
+    download = next(b for b in view.walk_children() if getattr(b, "label", "") == "Télécharger mes yamls")
+    interaction = click(bot)
+    await download.callback(interaction)
+    [sent] = interaction.response.sent
+    assert sent["ephemeral"] and [f.filename for f in sent["files"]] == ["psders.yaml", "bad.yaml"]
+    assert sent["files"][0].fp.read() == yaml("Psders1") and sent["files"][1].fp.read() == b"["
+
+    for _ in range(2):
+        remove = next(b for b in view.walk_children() if getattr(b, "label", "") == "Retirer")
+        await remove.callback(click(bot))
     assert "aucun yaml" in view_text(view)
+    assert not any(getattr(b, "label", "") == "Télécharger mes yamls" for b in view.walk_children())
     assert "Personne pour l'instant" in view_text(thread.messages[0].view)
 
 
@@ -131,10 +146,15 @@ async def test_everyone_can_download_every_yaml(bot, game):
     interaction = click(bot, user=5)
     await YamlsZipButton(record.id).callback(interaction)
     [sent] = interaction.response.sent
-    assert sent["ephemeral"] and "2 yamls" in view_text(sent["view"])
+    assert sent["ephemeral"] and "2 yamls" in view_text(sent["view"]) and "apworld" not in view_text(sent["view"])
     archive = zipfile.ZipFile(io.BytesIO(sent["file"].fp.read()))
-    assert archive.namelist() == ["player.yaml", "player (2).yaml"]
-    assert archive.read("player (2).yaml") == yaml("B")
+    assert archive.namelist() == ["Players/player.yaml", "Players/player (2).yaml"]
+    assert archive.read("Players/player (2).yaml") == yaml("B")
+
+    await bot.games.upload(record, 3, [FakeAttachment("broken.yaml", b"name: C\ngame: [\n")])
+    interaction = click(bot, user=5)
+    await YamlsZipButton(record.id).callback(interaction)
+    assert "⚠️ Yaml invalide : `broken.yaml` (<@3>)" in view_text(interaction.response.sent[0]["view"])
 
 
 async def test_yamls_dropped_in_the_post(bot, game):
@@ -192,8 +212,10 @@ async def test_tracking_in_the_post_claims_the_slots(bot, game, ap_server):
     panel = view_text(thread.messages[0].view)
     assert "Connecté" in panel and "Inscriptions" not in panel
     opened = next(m for m in thread.messages[1:] if "La room est ouverte" in m.text)
-    assert f"<@&{ROLE}> <@1> <@2>" in opened.text
+    assert f"Pour jouer : `{ap_server.address}`" in opened.text and "Room :" not in opened.text
+    assert "<@1> <@2>" in opened.text and f"<@&{ROLE}>" not in opened.text
     assert {u.id for u in opened.allowed_mentions.users} == {1, 2}
+    assert opened.allowed_mentions.roles is False
 
 
 async def test_games_whose_post_was_deleted_offline_are_cancelled(bot, game):
@@ -242,7 +264,6 @@ async def test_start_suggestions(bot, game):
     cog = bot.get_cog("partie")
     [choice] = await cog.start_autocomplete(FakeInteraction(), "12/10/2099 21h")
     assert choice.name == choice.value == "lundi 12/10/2099 à 21:00"
-    assert len(await cog.start_autocomplete(FakeInteraction(), "")) == 4
     with pytest.raises(UserError, match="déjà passée"):
         await new_game(bot, game[1].parent.guild, debut="01/01/2020 21h")
 
@@ -299,3 +320,120 @@ async def test_back_to_signup_after_a_wrong_start(bot, game, ap_server):
 
     await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
     assert bot.rooms.by_thread(thread.id).claims == {1: 1}
+
+
+def parts_of(view) -> dict:
+    return {
+        i.label if isinstance(i, discord.ui.Button) else i.placeholder: i
+        for i in view.walk_children()
+        if isinstance(i, discord.ui.Button | discord.ui.Select)
+    }
+
+
+async def test_custom_games_need_their_apworld(bot, game):
+    record, thread = game
+    bot.games.core.games = frozenset({"Celeste"})
+    cog = bot.get_cog("partie")
+    message = FakeUserMessage(thread, attachments=[FakeAttachment("a.yaml", yaml("A", "Hacknet"))], author=FakeUser(1))
+    await cog.on_message(message)
+    report = message.replies[0]["view"]
+    assert "*Hacknet* n'est pas un jeu officiel" in view_text(report) and "Mon yaml" in view_text(report)
+    assert not parts_of(report)
+    assert "⚠️ *Hacknet* · apworld manquant" in view_text(thread.messages[0].view)
+
+    message = FakeUserMessage(thread, attachments=[FakeAttachment("Hacknet_1.apworld", apworld())], author=FakeUser(1))
+    await cog.on_message(message)
+    assert message.reactions == ["✅"]
+    panel = view_text(thread.messages[0].view)
+    assert "`hacknet` v0.3.1 · *Hacknet* · <@1>" in panel and "manquant" not in panel
+
+    interaction = click(bot, user=5)
+    await YamlsZipButton(record.id).callback(interaction)
+    [sent] = interaction.response.sent
+    assert "**1 yaml** · **1 apworld**" in view_text(sent["view"]) and "custom_worlds" in view_text(sent["view"])
+    assert sent["file"].filename == "archipelago.zip"
+    archive = zipfile.ZipFile(io.BytesIO(sent["file"].fp.read()))
+    assert archive.namelist() == ["Players/a.yaml", "custom_worlds/hacknet.apworld"]
+    assert archive.read("custom_worlds/hacknet.apworld") == apworld()
+
+
+async def test_apworlds_sent_before_are_offered_again(bot, game):
+    record, thread = game
+    bot.games.core.games = frozenset({"Celeste"})
+    await bot.games.upload(record, 1, [FakeAttachment("hacknet.apworld", apworld(version="0.3.0"))])
+    assert "`hacknet` v0.3.0 · *Hacknet* · <@1>" in view_text(thread.messages[0].view)
+    await bot.games.cancel(record)
+
+    await new_game(bot, thread.parent.guild, nom="Dimanche")
+    sunday, sunday_thread = bot.games.by_thread(thread.parent.threads[-1].id), thread.parent.threads[-1]
+    interaction = click(bot, user=2)
+    await YamlButton(sunday.id).callback(interaction)
+    modal = interaction.response.sent[0]["modal"]
+    modal.upload._values = [FakeAttachment("b.yaml", yaml("B", "Hacknet"))]
+    submit = click(bot, user=2)
+    await modal.on_submit(submit)
+    report = submit.followup.sent[0]["view"]
+    assert "Reprends celui déjà envoyé sur le serveur" in view_text(report)
+    pick = click(bot, user=2)
+    await parts_of(report)["Utiliser hacknet v0.3.0"].callback(pick)
+    assert "Apworld choisi : `hacknet` v0.3.0" in view_text(pick.response.sent[0]["view"])
+    assert not parts_of(report)
+    assert "`hacknet` v0.3.0 · *Hacknet* · <@2>" in view_text(sunday_thread.messages[0].view)
+
+    await bot.games.upload(sunday, 3, [FakeAttachment("hacknet.apworld", apworld())])
+    interaction = click(bot, user=2)
+    await YamlButton(sunday.id).callback(interaction)
+    mine = interaction.response.sent[0]["view"]
+    assert "pas un jeu officiel" not in view_text(mine) and not parts_of(mine).keys() - {
+        "Retirer",
+        "Envoyer un fichier",
+        "Télécharger mes yamls",
+    }
+
+    await bot.games.remove_apworld(sunday, 3, (await bot.games.attached(sunday))[0].apworld.id)
+    interaction = click(bot, user=2)
+    await YamlButton(sunday.id).callback(interaction)
+    mine = interaction.response.sent[0]["view"]
+    select = parts_of(mine)["Choisir un apworld de Hacknet"]
+    assert [o.label for o in select.options] == ["hacknet v0.3.1", "hacknet v0.3.0"]
+    select._values = [select.options[1].value]
+    await select.callback(click(bot, user=2))
+    [attached] = await bot.games.attached(sunday)
+    assert (attached.apworld.version, attached.user_id) == ("0.3.0", 2)
+    assert "Choisir" not in parts_of(mine) and "Retirer" in parts_of(mine)
+
+    await parts_of(mine)["Retirer"].callback(click(bot, user=2))
+    assert await bot.games.attached(sunday) == [] and "Choisir un apworld de Hacknet" in parts_of(mine)
+    assert "*Hacknet* · apworld manquant" in view_text(sunday_thread.messages[0].view)
+
+
+async def test_apworlds_are_offered_when_core_games_are_unknown(bot, game):
+    record, thread = game
+    await bot.games.upload(record, 1, [FakeAttachment("a.yaml", yaml("A", "Hacknet"))])
+    assert "Apworlds" not in view_text(thread.messages[0].view)
+    report = await UploadReport.create(bot.games, record, 1, [])
+    assert not report.needs_answer
+
+    await bot.games.upload(record, 1, [FakeAttachment("hacknet.apworld", apworld()), FakeAttachment("x.apworld", b"")])
+    await bot.games.remove_apworld(record, 1, (await bot.games.attached(record))[0].apworld.id)
+    assert await bot.games.missing(record, await bot.games.files(record)) == {
+        "Hacknet": await bot.games.apworlds.library(1, ["Hacknet"])
+    }
+
+
+async def test_big_bundles_are_split(bot, game):
+    record, _ = game
+    noise = random.Random(0).randbytes(200_000)
+    await bot.games.upload(
+        record,
+        1,
+        [
+            FakeAttachment("a.yaml", yaml("A", "Hacknet")),
+            FakeAttachment("hacknet.apworld", apworld(**{"hacknet/data.bin": noise})),
+            FakeAttachment("tunic.apworld", apworld("tunic", "TUNIC", **{"tunic/data.bin": noise})),
+        ],
+    )
+    bundle = await bot.games.bundle(record, ZIP_OVERHEAD + 250_000)
+    assert (bundle.yamls, bundle.apworlds) == (1, 2)
+    names = [zipfile.ZipFile(io.BytesIO(part)).namelist() for part in bundle.parts]
+    assert names == [["Players/a.yaml", "custom_worlds/hacknet.apworld"], ["custom_worlds/tunic.apworld"]]

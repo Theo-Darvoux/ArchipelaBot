@@ -29,6 +29,7 @@ LIGHT = "#DBDEE1"
 RED = "#F23F43"
 ORANGE = "#F0A030"
 GOLD = "#F0B232"
+YELLOW = "#FEE75C"
 BLURPLE = "#949CF7"
 TRACK = "#4E505899"
 
@@ -57,8 +58,9 @@ GLYPHS = {
     "error": ("cancel", RED),
     "info": ("info", BLURPLE),
     "signup": ("edit_note", GREEN),
-    "yaml": ("description", USEFUL),
+    "yaml": ("description", YELLOW),
     "zip": ("folder_zip", GOLD),
+    "apworld": ("extension", PROGRESSION),
     "random": ("casino", BLURPLE),
     "calendar": ("calendar_month", LIGHT),
 }

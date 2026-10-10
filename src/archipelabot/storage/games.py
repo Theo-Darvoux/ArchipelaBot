@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
-from ..core.yamls import YamlError, YamlFile, parse_players
+from ..core.yamls import YamlError, YamlFile, read_yaml
 from .db import Database
 from .rooms import _parse_utc
 
@@ -100,11 +100,11 @@ class GameRepo:
         files = []
         for row in rows:
             try:
-                players = parse_players(row["content"])
+                f = read_yaml(row["user_id"], row["filename"], row["content"], row["id"])
             except YamlError:
                 log.warning("Stored yaml %s can no longer be read", row["id"], exc_info=True)
-                players = []
-            files.append(YamlFile(row["user_id"], row["filename"], row["content"], players, id=row["id"]))
+                f = YamlFile(row["user_id"], row["filename"], row["content"], id=row["id"])
+            files.append(f)
         return files
 
     async def replace_yamls(self, game_id: int, new: YamlFile, replaced: list[YamlFile]) -> None:

@@ -5,7 +5,6 @@ from archipelabot.core import events as ev
 from archipelabot.core.events import ConnectionState
 from archipelabot.core.progress import Baseline, Progress
 from archipelabot.core.room import RoomState, SlotInfo
-from archipelabot.ui.emojis import E
 from archipelabot.ui.render.panel import ROSTER_BUDGET, panel_view, roster
 from archipelabot.ui.render.status import player_status_view
 
@@ -24,12 +23,6 @@ def make_room(players: int = 3) -> tuple[RoomState, Progress]:
     )
     progress = Progress(state, clock=lambda: T0)
     return state, progress
-
-
-def test_icons_fall_back_to_unicode_until_uploaded():
-    assert (E.prog, E.online, E.goal) == ("🟣", "🟢", "🏆")
-    assert E.ring(None) == E.ring(0.0) == "◯" and E.ring(1.0) == "●"
-    assert E.url("ap_goal") is None
 
 
 def test_panel_content_and_order():

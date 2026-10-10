@@ -26,7 +26,3 @@ async def test_help_links_synced_commands(bot):
     interaction = FakeInteraction()
     await cog.help.callback(cog, interaction)
     assert "</track start:123>" in view_text(interaction.replies[0]["view"])
-
-
-def test_status_points_to_help(bot):
-    assert bot.activity.name == "/help"

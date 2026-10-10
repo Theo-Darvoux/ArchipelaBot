@@ -4,7 +4,7 @@ from archipelabot.ap.protocol import ClientStatus, ItemFlags
 from archipelabot.core import events as ev
 from archipelabot.core.room import RoomState, SlotInfo
 from archipelabot.storage.rooms import RoomSettings
-from archipelabot.ui.render.feed import Card, Line, Ping, feed_view, render_event
+from archipelabot.ui.render.feed import Line, Ping, feed_view, render_event
 from archipelabot.ui.services.feed import FeedMessage, FeedService, pack_lines
 from archipelabot.ui.services.panel import PanelService
 from archipelabot.ui.services.presence import Presence
@@ -108,6 +108,7 @@ class Sink:
 
     async def send_view(self, view) -> None:
         self.sent.append(f"[card] {view_text(view)}")
+
 
 def away_feed(statuses):
     now = [0.0]

@@ -101,6 +101,7 @@ async def test_claim_rules(bot, room):
 
 async def test_panel_shows_claims_and_button(bot, room):
     runtime, thread, _ = room
+    runtime.panel.urgent_interval = 0.05
     await runtime.claim(2, 77)
     view = runtime.render_panel()
     assert "· Bob · *A Short Hike* · ⚫ · <@77>" in view_text(view)
@@ -108,8 +109,9 @@ async def test_panel_shows_claims_and_button(bot, room):
     assert button.custom_id == f"archipelabot:claim:{runtime.record.id}"
     view.to_components()  # serialisable as a real message
 
-    await asyncio.sleep(3.2)  # the panel service edits the real message (urgent interval)
-    assert "<@77>" in view_text(thread.messages[0].view)
+    async with asyncio.timeout(5):  # the panel service edits the real message
+        while "<@77>" not in view_text(thread.messages[0].view):
+            await asyncio.sleep(0.05)
 
 
 async def test_claim_button_picker(bot, room):

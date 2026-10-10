@@ -5,9 +5,10 @@ from archipelabot.core.yamls import (
     PlayerYaml,
     YamlError,
     YamlFile,
+    YamlSyntaxError,
     assign_slots,
-    is_yaml_filename,
     parse_players,
+    read_yaml,
     replaced_by,
     warnings,
 )
@@ -42,7 +43,6 @@ def test_byte_order_mark_is_ignored():
 @pytest.mark.parametrize(
     ("content", "error"),
     [
-        (b"name: A\ngame: [\n", r"pas un yaml valide \(ligne \d"),
         (b"", "vide"),
         (b"- a\n- b\n", "pas un yaml de joueur"),
         (b"game: Celeste\n", "nom du slot"),
@@ -57,9 +57,18 @@ def test_invalid_yamls(content, error):
         parse_players(content)
 
 
-def test_filenames():
-    assert is_yaml_filename("Psders.YAML") and is_yaml_filename("a.yml")
-    assert not is_yaml_filename("a.txt")
+def test_syntax_errors_say_where_and_what():
+    with pytest.raises(YamlSyntaxError) as e:
+        parse_players(b"name: A\ngame: Celeste\n  Celeste: 1\n")
+    assert str(e.value) == "Yaml invalide ligne 3, colonne 10 : `mapping values are not allowed in this context`"
+
+
+def test_a_syntax_error_does_not_block():
+    f = read_yaml(1, "a.yaml", b"name: A\ngame: [\n")
+    assert f.players == [] and f.invalid.startswith("Yaml invalide ligne 3")
+    assert read_yaml(1, "a.yaml", LUIGI).invalid is None
+    with pytest.raises(YamlError, match="nom du slot"):
+        read_yaml(1, "a.yaml", b"game: Celeste\n")
 
 
 def test_placeholders_and_long_names():

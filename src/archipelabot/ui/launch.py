@@ -130,7 +130,7 @@ async def _launch(
     recognised = await bot.rooms.auto_claim(runtime)
     runtime.panel.request_update(urgent=True)
     if game is not None:
-        await _announce(bot, runtime, participants)
+        await _announce(runtime, participants)
     return runtime, recognised
 
 
@@ -160,16 +160,13 @@ async def _connect(bot: "ArchipelaBot", record: RoomRecord, woke: bool) -> RoomT
     raise UserError("La room ne s'est pas réveillée à temps. Réessaie dans un instant.")
 
 
-async def _announce(bot: "ArchipelaBot", runtime: RoomRuntime, participants: list[int]) -> None:
-    config = await bot.guild_configs.get(runtime.record.guild_id)
-    roles = [config.ping_role_id] if config.ping_role_id else []
-    mentions = " ".join([*(f"<@&{role}>" for role in roles), *(f"<@{user}>" for user in participants)])
+async def _announce(runtime: RoomRuntime, participants: list[int]) -> None:
+    mentions = " ".join(f"<@{user}>" for user in participants)
     webhost = runtime.record.webhost
-    link = f" · [ouvrir la room]({webhost.page_url})" if webhost else f" · `{runtime.tracker.state.address}`"
-    text = f"### {E.online} La room est ouverte !{link}\n{mentions}".rstrip()
-    allowed = discord.AllowedMentions(
-        roles=[discord.Object(r) for r in roles], users=[discord.Object(u) for u in participants]
-    )
+    room = f"\nRoom : {webhost.page_url}" if webhost else ""
+    play = f"\nPour jouer : `{runtime.tracker.state.address}`"
+    text = f"### {E.online} La room est ouverte !{room}{play}\n{mentions}".rstrip()
+    allowed = discord.AllowedMentions(roles=False, users=[discord.Object(u) for u in participants])
     try:
         await runtime.sink.send_view(notice(text, Tone.SUCCESS), allowed_mentions=allowed)
     except discord.HTTPException:

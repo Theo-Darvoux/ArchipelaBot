@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 
@@ -17,6 +17,7 @@ RETRY_DELAYS = (5, 10, 20, 40, 80, 160, 300)
 BULK_QUIET = 1.5
 NON_GAME_TAGS = frozenset({"TextOnly", "Tracker", "HintGame"})
 BRIDGE_PREFIX = "[Discord]"
+ONLINE = frozenset({p.ClientStatus.CONNECTED, p.ClientStatus.READY, p.ClientStatus.PLAYING})
 WAKE_GRACE = 2
 WAKE_ATTEMPTS = 5
 
@@ -47,7 +48,8 @@ class RoomState:
     statuses: dict[int, p.ClientStatus] = field(default_factory=dict)
     hints: dict[tuple[int, int], ev.HintInfo] = field(default_factory=dict)  # by (finder, location)
     relay_slots: set[int] = field(default_factory=set)
-    games_on_shared: set[int] = field(default_factory=set)
+    games: set[int] = field(default_factory=set)  # a game client is known to be connected
+    watchers: Counter[int] = field(default_factory=Counter)  # trackers, text clients and the bot's own
     connection: ev.ConnectionState = ev.ConnectionState.CONNECTING
 
     def name(self, slot: int) -> str:
@@ -72,10 +74,11 @@ class RoomState:
 
     def is_online(self, slot: int) -> bool:
         """A game client is connected to this slot."""
-        if self.is_shared(slot):  # the bot's own connection keeps the server status up
-            return slot in self.games_on_shared
-        status = self.statuses.get(slot, p.ClientStatus.UNKNOWN)
-        return status in (p.ClientStatus.CONNECTED, p.ClientStatus.READY, p.ClientStatus.PLAYING)
+        if slot in self.games:
+            return True
+        if self.is_shared(slot) or self.watchers[slot]:  # the server status is up for any client
+            return False
+        return self.statuses.get(slot, p.ClientStatus.UNKNOWN) in ONLINE
 
     def is_shared(self, slot: int) -> bool:
         return slot == self.own_slot or slot in self.relay_slots
@@ -83,9 +86,9 @@ class RoomState:
     def share(self, slot: int, online: bool) -> None:
         """The bot now connects as `slot` too; `online`: whether a game was connected before it did."""
         if online:
-            self.games_on_shared.add(slot)
+            self.games.add(slot)
         else:
-            self.games_on_shared.discard(slot)
+            self.games.discard(slot)
         self.relay_slots.add(slot)
 
 
@@ -126,6 +129,7 @@ class RoomTracker:
         self._said: deque[tuple[int, str]] = deque(maxlen=50)
         self._checksums: dict[str, str] = {}
         self._hints_loaded = False
+        self._unidentified: set[int] = set()  # brought online by a client whose Join hasn't arrived yet
 
     def subscribe(self, listener: Listener) -> None:
         self._listeners.append(listener)
@@ -220,11 +224,13 @@ class RoomTracker:
         status_keys, hint_keys = self._status_keys(), self._hint_keys()
         values = await session.get([*status_keys, *hint_keys])
         self.state.statuses = {slot: p.ClientStatus(values.get(key) or 0) for key, slot in status_keys.items()}
-        self.state.games_on_shared = {
+        self.state.games = {
             slot
-            for slot in {self.state.own_slot, *self.state.relay_slots}
-            if self.state.statuses.get(slot) in (p.ClientStatus.READY, p.ClientStatus.PLAYING)
+            for slot, status in self.state.statuses.items()
+            if status in (p.ClientStatus.READY, p.ClientStatus.PLAYING)
         }
+        self.state.watchers.clear()
+        self._unidentified.clear()
         hints = {hint.key: hint for key in hint_keys for hint in map(self._hint_info, values.get(key) or [])}
         added = [h for k, h in hints.items() if k not in self.state.hints and not h.found] if self._hints_loaded else []
         self.state.hints, self._hints_loaded = hints, True
@@ -349,8 +355,10 @@ class RoomTracker:
                 await self._update_hints(packet.value or [])
             case p.SetReply(key=key) if (slot := self._status_keys().get(key)) is not None:
                 status = p.ClientStatus(packet.value or 0)
-                if self.state.statuses.get(slot) != status:
+                previous = self.state.statuses.get(slot, p.ClientStatus.UNKNOWN)
+                if previous != status:
                     self.state.statuses[slot] = status
+                    self._status_changed(slot, previous, status)
                     await self._emit(ev.ClientStatusChanged(slot, status))
             case p.PrintJSON(type="ItemSend", item=p.NetworkItem() as item, receiving=int(receiver)):
                 await self._item_sent(self._item_event(item, receiver))
@@ -372,11 +380,17 @@ class RoomTracker:
             case p.PrintJSON(type="ServerChat", message=str(message)):
                 await self._emit(ev.ChatMessage(0, message))
             case p.PrintJSON(type="Join", slot=int(slot), tags=tags) if not NON_GAME_TAGS & set(tags or ()):
-                self.state.games_on_shared.add(slot)
+                self._unidentified.discard(slot)
+                self.state.games.add(slot)
                 await self._emit(ev.PlayerJoined(slot))
+            case p.PrintJSON(type="Join", slot=int(slot)):
+                self._watcher_joined(slot)
             case p.PrintJSON(type="Part", slot=int(slot)) if "has left the game" in packet.text:
-                self.state.games_on_shared.discard(slot)
+                self.state.games.discard(slot)
                 await self._emit(ev.PlayerLeft(slot))
+            case p.PrintJSON(type="Part", slot=int(slot)):  # "has stopped tracking/viewing the game"
+                if self.state.watchers[slot] > 0:
+                    self.state.watchers[slot] -= 1
             case p.Bounced() if "DeathLink" in packet.tags:
                 await self._emit(ev.Death(str(packet.data.get("source", "?")), packet.data.get("cause") or None))
             case p.RoomUpdate(players=list(players)):
@@ -401,6 +415,21 @@ class RoomTracker:
             self._bulk.deadline = time.monotonic() + self.bulk_quiet
         else:
             await self._emit(event)
+
+    def _status_changed(self, slot: int, previous: p.ClientStatus, status: p.ClientStatus) -> None:
+        if status == p.ClientStatus.UNKNOWN:  # nobody is connected anymore
+            self.state.games.discard(slot)
+            self.state.watchers.pop(slot, None)
+            self._unidentified.discard(slot)
+        elif previous == p.ClientStatus.UNKNOWN:
+            self._unidentified.add(slot)
+
+    def _watcher_joined(self, slot: int) -> None:
+        if slot in self._unidentified:
+            self._unidentified.discard(slot)
+        elif not (self.state.is_shared(slot) or self.state.watchers[slot]) and self.state.statuses.get(slot) in ONLINE:
+            self.state.games.add(slot)  # already online before this client, from before the bot was watching
+        self.state.watchers[slot] += 1
 
     async def _start_bulk(self, kind: type[ev.Released] | type[ev.Collected], slot: int) -> None:
         await self._finish_bulk()

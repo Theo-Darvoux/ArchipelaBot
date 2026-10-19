@@ -346,6 +346,20 @@ def parts_of(view) -> dict:
     }
 
 
+async def test_an_apworld_for_another_game_is_named(bot, game):
+    _, thread = game
+    bot.games.core.games = frozenset({"Celeste"})
+    cog = bot.get_cog("partie")
+    files = [
+        FakeAttachment("a.yaml", yaml("A", "Hacknet")),
+        FakeAttachment("s.apworld", apworld("spire", "Slay the Spire")),
+    ]
+    message = FakeUserMessage(thread, attachments=files, author=FakeUser(1))
+    await cog.on_message(message)
+    text = view_text(message.replies[0]["view"])
+    assert "*Hacknet* n'est pas un jeu officiel" in text and "Celui envoyé est pour *Slay the Spire*" in text
+
+
 async def test_custom_games_need_their_apworld(bot, game):
     record, thread = game
     bot.games.core.games = frozenset({"Celeste"})

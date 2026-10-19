@@ -1,6 +1,7 @@
 import contextlib
 import io
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import discord
@@ -35,12 +36,16 @@ FILENAME = re.compile(r"[^\w.-]")
 
 
 def apworld_prompts(
-    games: "GameManager", game: GameRecord, missing: dict[str, list[Apworld]], on_pick
+    games: "GameManager",
+    game: GameRecord,
+    missing: dict[str, list[Apworld]],
+    on_pick,
+    stray: Sequence[Apworld] = (),
 ) -> list[ui.Item]:
     """For each game still without its apworld: what to do, and the ones this server already has to pick from."""
     items: list[ui.Item] = []
     for name, library in list(missing.items())[:MAX_PROMPTS]:
-        items.append(ui.TextDisplay(missing_text(name, bool(library))))
+        items.append(ui.TextDisplay(missing_text(name, bool(library), stray)))
         if len(library) == 1:
             button = ui.Button(
                 label=f"Utiliser {library[0].label}"[:80], emoji=E.partial("apworld"), style=discord.ButtonStyle.primary
@@ -94,12 +99,14 @@ class UploadReport(ui.LayoutView):
         user_id: int,
         uploads: list[Upload],
         missing: dict[str, list[Apworld]],
+        stray: Sequence[Apworld] = (),
     ) -> None:
         super().__init__(timeout=900)
         self.games = games
         self.game = game
         self.user_id = user_id
         self.uploads = uploads
+        self.stray = stray
         self.picked: list[Apworld] = []
         self.needs_answer = upload_tone(uploads, list(missing)) is not Tone.SUCCESS
         self._build(missing)
@@ -109,13 +116,15 @@ class UploadReport(ui.LayoutView):
         cls, games: "GameManager", game: GameRecord, user_id: int, uploads: list[Upload]
     ) -> "UploadReport":
         mine = [f for f in await games.files(game) if f.user_id == user_id]
-        return cls(games, game, user_id, uploads, await games.missing(game, mine))
+        wanted = {p.game for f in mine for p in f.players}
+        stray = [u.apworld for u in uploads if u.apworld and u.apworld.game not in wanted]
+        return cls(games, game, user_id, uploads, await games.missing(game, mine), stray)
 
     def _build(self, missing: dict[str, list[Apworld]]) -> None:
         self.clear_items()
         lines = [upload_text(u) for u in self.uploads]
         lines += [f"{E.apworld} Apworld choisi : {apworld_label(a)}" for a in self.picked]
-        prompts = apworld_prompts(self.games, self.game, missing, self._picked)
+        prompts = apworld_prompts(self.games, self.game, missing, self._picked, self.stray)
         self.add_item(
             ui.Container(
                 ui.TextDisplay("\n".join(lines)),

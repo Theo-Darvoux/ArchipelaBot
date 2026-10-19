@@ -30,8 +30,12 @@ def apworld_label(apworld: Apworld) -> str:
     return f"{code(apworld.module)}{version} · *{md(apworld.game)}*"
 
 
-def missing_text(game: str, in_library: bool) -> str:
+def missing_text(game: str, in_library: bool, stray: Sequence[Apworld] = ()) -> str:
     text = f"{E.apworld} *{md(game)}* n'est pas un jeu officiel : il faut son `.apworld`."
+    if stray:
+        games = ", ".join(sorted({f"*{md(a.game)}*" for a in stray}))
+        sent = "Celui envoyé est pour" if len(stray) == 1 else "Ceux envoyés sont pour"
+        text += f" {sent} {games}, pas pour ce jeu."
     if in_library:
         return text + " Reprends celui déjà envoyé sur le serveur, ou envoie le tien."
     return text + f" Envoie-le avec {E.yaml} **Mon yaml** ou dépose-le dans le post."

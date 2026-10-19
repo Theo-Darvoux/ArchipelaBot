@@ -1,10 +1,23 @@
+from datetime import UTC, datetime
+
 import discord
 import pytest
 
 from archipelabot.errors import UserError
 from archipelabot.ui.forum import TAG_SPECS, RoomTag, ensure_room_tags
 
-from .fakes import FakeForum, FakeInteraction, FakeTag, view_text
+from .fakes import (
+    FakeAttachment,
+    FakeForum,
+    FakeGuild,
+    FakeInteraction,
+    FakeTag,
+    FakeThread,
+    FakeUser,
+    FakeUserMessage,
+    view_text,
+)
+from .test_apworlds import apworld
 
 
 async def test_ensure_room_tags_creates_only_missing():
@@ -86,3 +99,75 @@ async def test_ping_role_set_and_cleared(bot):
 
     await cog.set_ping_role.callback(cog, FakeInteraction(), None)
     assert (await bot.guild_configs.get(1)).ping_role_id is None
+
+
+class ApworldChannel:
+    def __init__(self, messages, permissions=None) -> None:
+        self.id = 8
+        self.mention = "<#8>"
+        self.guild = FakeGuild()
+        self.messages = messages
+        self.permissions = permissions or discord.Permissions.all()
+
+    def permissions_for(self, _member) -> discord.Permissions:
+        return self.permissions
+
+    async def history(self, limit=None, oldest_first=False):
+        assert limit is None and oldest_first
+        for message in self.messages:
+            yield message
+
+
+def posted(channel_id, user, day, *attachments) -> FakeUserMessage:
+    message = FakeUserMessage(
+        FakeThread(channel_id, "", None, []), attachments=list(attachments), author=FakeUser(user)
+    )
+    message.created_at = datetime(2026, 10, day, 17, 16, tzinfo=UTC)
+    return message
+
+
+async def test_apworld_channel_is_imported_then_followed(bot):
+    cog = bot.get_cog("config")
+    spire = FakeAttachment("spire.apworld", apworld("spire", "Slay the Spire"))
+    channel = ApworldChannel(
+        [
+            posted(8, 1, 16, FakeAttachment("hacknet.apworld", apworld(version="0.3.0"))),
+            posted(8, 2, 17, spire, FakeAttachment("notes.txt", b"x")),
+            posted(8, 3, 17, FakeAttachment("broken.apworld", b"")),
+            posted(8, 4, 18, FakeAttachment("hacknet.apworld", apworld())),
+            posted(8, 5, 18, FakeAttachment("spire_copy.apworld", spire.content)),
+        ]
+    )
+    with pytest.raises(UserError, match="read_message_history"):
+        await cog.set_apworlds.callback(
+            cog, FakeInteraction(), ApworldChannel([], discord.Permissions(view_channel=True))
+        )
+
+    interaction = FakeInteraction()
+    await cog.set_apworlds.callback(cog, interaction, channel)
+    text = view_text(interaction.followup.sent[0]["view"])
+    assert "3 nouveaux, 1 déjà sur le serveur" in text and "`broken.apworld` : ce n'est pas un apworld valide" in text
+    assert (await bot.guild_configs.get(1)).apworld_channel_id == 8
+    library = await bot.games.apworlds.library(1, ["Hacknet", "Slay the Spire"])
+    assert [(a.label, a.uploaded_by, a.uploaded_at.day) for a in library] == [
+        ("hacknet v0.3.1", 4, 18),
+        ("spire v0.3.1", 2, 17),
+        ("hacknet v0.3.0", 1, 16),
+    ]
+
+    listener = bot.get_cog("apworld")
+    message = posted(8, 6, 19, FakeAttachment("tunic.apworld", apworld("tunic", "TUNIC")))
+    await listener.on_message(message)
+    assert message.reactions == ["✅"] and len(await bot.games.apworlds.library(1, ["TUNIC"])) == 1
+    message = posted(8, 6, 19, FakeAttachment("x.apworld", b""))
+    await listener.on_message(message)
+    assert "Apworld ignoré" in view_text(message.replies[0]["view"])
+    message = posted(9, 6, 19, FakeAttachment("other.apworld", apworld("other", "Other")))
+    await listener.on_message(message)
+    assert not message.reactions and await bot.games.apworlds.library(1, ["Other"]) == []
+
+    interaction = FakeInteraction()
+    await cog.show.callback(cog, interaction)
+    assert "**Salon des apworlds** : <#8>" in view_text(interaction.replies[0]["view"])
+    await cog.set_apworlds.callback(cog, FakeInteraction(), None)
+    assert (await bot.guild_configs.get(1)).apworld_channel_id is None

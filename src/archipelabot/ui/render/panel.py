@@ -6,10 +6,11 @@ import discord
 from discord import ui
 
 from ...core.events import ConnectionState
+from ...core.logic import SlotLogic
 from ...core.progress import Progress
 from ...core.room import RoomState
 from ..emojis import E
-from .text import fit_lines, md
+from .text import fit_lines, md, plural
 
 # (icon, label)
 CONNECTION_LABELS: dict[ConnectionState, tuple[str, str]] = {
@@ -53,26 +54,51 @@ def presence(slot: int, state: RoomState, progress: Progress) -> str | None:
     return f"{E.offline} {discord.utils.format_dt(last, 'R')}" if last else E.offline
 
 
-def player_line(slot: int, state: RoomState, progress: Progress, claims: dict[int, int], *, detailed: bool) -> str:
+def in_logic(slot: int, progress: Progress, logic: dict[int, SlotLogic]) -> str | None:
+    """What the player can do right now according to the game's logic. None when it isn't known."""
+    result = logic.get(slot)
+    if result is None or progress.reached_goal(slot):
+        return None
+    if result.blocked:
+        return f"{E.blocked} **bloqué**"
+    if not result.accessible:
+        return f"{E.reachable} objectif faisable"
+    return f"{E.reachable} {plural(result.accessible, 'check')} en logique"
+
+
+def player_line(
+    slot: int,
+    state: RoomState,
+    progress: Progress,
+    claims: dict[int, int],
+    logic: dict[int, SlotLogic],
+    *,
+    detailed: bool,
+) -> str:
     p = progress[slot]
     parts = [f"{progress_icon(slot, progress)} **{percent(p.ratio)}**", md(state.name(slot))]
+    blocked = slot in logic and logic[slot].blocked and not progress.reached_goal(slot)
     if detailed:
         parts.append(f"*{md(state.game(slot))}*")
+        if doable := in_logic(slot, progress, logic):
+            parts.append(doable)
         if p.deaths:
             parts.append(f"{E.death} {p.deaths}")
         if here := presence(slot, state, progress):
             parts.append(here)
         if slot in claims:
             parts.append(f"<@{claims[slot]}>")
+    elif blocked:
+        parts.append(E.blocked)
     return " · ".join(parts)
 
 
-def roster(state: RoomState, progress: Progress, claims: dict[int, int]) -> str:
+def roster(state: RoomState, progress: Progress, claims: dict[int, int], logic: dict[int, SlotLogic]) -> str:
     """Every player, best first; drops details then players if it doesn't fit in one message."""
     slots = progress.ranking()
-    lines = [player_line(s, state, progress, claims, detailed=True) for s in slots]
+    lines = [player_line(s, state, progress, claims, logic, detailed=True) for s in slots]
     if sum(len(line) + 1 for line in lines) > ROSTER_BUDGET:
-        lines = [player_line(s, state, progress, claims, detailed=False) for s in slots]
+        lines = [player_line(s, state, progress, claims, logic, detailed=False) for s in slots]
     return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres · `/status joueur:` pour le détail")
 
 
@@ -81,7 +107,7 @@ def connection_label(state: ConnectionState) -> str:
     return f"{E.get(icon)} {label}"
 
 
-def summary_line(state: RoomState, progress: Progress) -> str:
+def summary_line(state: RoomState, progress: Progress, logic: dict[int, SlotLogic] | None = None) -> str:
     players = state.players
     goals = sum(progress.reached_goal(s.slot) for s in players)
     total = progress.total
@@ -90,7 +116,15 @@ def summary_line(state: RoomState, progress: Progress) -> str:
         if total
         else (f"**{progress.done}** checks")
     )
-    return f"{checks} · {goals}/{len(players)} goals"
+    line = f"{checks} · {goals}/{len(players)} goals"
+    if logic:
+        blocked = sum(
+            1 for s in players if s.slot in logic and logic[s.slot].blocked and not progress.reached_goal(s.slot)
+        )
+        line += (
+            f" · {E.blocked} {plural(blocked, 'bloqué', 'bloqués')}" if blocked else f" · {E.reachable} aucun bloqué"
+        )
+    return line
 
 
 def panel_view(
@@ -100,16 +134,17 @@ def panel_view(
     *,
     since: datetime,
     claims: dict[int, int] | None = None,
+    logic: dict[int, SlotLogic] | None = None,
     page_url: str | None = None,
     buttons: list[ui.Item] | None = None,
 ) -> ui.LayoutView:
     title = f"## [{md(name)}]({page_url})" if page_url else f"## {md(name)}"
     status = (
-        f"{summary_line(state, progress)}\n"
+        f"{summary_line(state, progress, logic)}\n"
         f"-# {connection_label(state.connection)} · {state.address} · "
         f"suivi depuis {discord.utils.format_dt(since, 'R')}"
     )
-    players = roster(state, progress, claims or {}) or "*Aucun joueur*"
+    players = roster(state, progress, claims or {}, logic or {}) or "*Aucun joueur*"
 
     view = ui.LayoutView(timeout=None)
     view.add_item(

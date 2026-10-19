@@ -42,6 +42,7 @@ class SlotInfo:
 @dataclass
 class RoomState:
     address: str
+    seed_name: str = ""
     team: int = 0
     own_slot: int = 0
     slots: dict[int, SlotInfo] = field(default_factory=dict)
@@ -194,6 +195,7 @@ class RoomTracker:
             await session.close()
             raise
         connected = session.connected
+        self.state.seed_name = session.room_info.seed_name
         self.state.team, self.state.own_slot = connected.team, connected.slot
         aliases = {player.slot: player.alias for player in connected.players}
         self.state.slots = {

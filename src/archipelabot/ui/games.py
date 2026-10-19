@@ -3,8 +3,8 @@ import contextlib
 import io
 import logging
 import zipfile
-from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, Iterable, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePath
 from typing import TYPE_CHECKING
@@ -79,6 +79,13 @@ class Bundle:
     apworlds: int
 
 
+@dataclass(slots=True)
+class ApworldImport:
+    added: list[Apworld] = field(default_factory=list)
+    known: int = 0
+    refused: list[tuple[str, str]] = field(default_factory=list)  # filename, why
+
+
 class GameManager:
     def __init__(self, bot: "ArchipelaBot") -> None:
         self.bot = bot
@@ -115,7 +122,11 @@ class GameManager:
         """Games of these yamls still without their apworld, with the ones this server already has for them."""
         attached = await self.attached(game) if attached is None else attached
         have = {a.apworld.game for a in attached}
-        wanted = sorted({p.game for f in files for p in f.players if p.game and p.game not in have})
+        return {name: library for name, library in (await self.custom(game, files)).items() if name not in have}
+
+    async def custom(self, game: GameRecord, files: Sequence[YamlFile]) -> dict[str, list[Apworld]]:
+        """Games of these yamls that need an apworld, with the ones this server has for them."""
+        wanted = sorted({p.game for f in files for p in f.players if p.game})
         core = await self.core.get()
         library = await self.apworlds.library(game.guild_id, wanted)
         known = {a.game for a in library}
@@ -231,10 +242,7 @@ class GameManager:
     async def _upload_apworld(self, game: GameRecord, user_id: int, attachment: discord.Attachment) -> Upload:
         upload = Upload(attachment.filename)
         try:
-            if attachment.size > MAX_APWORLD_SIZE:
-                raise ApworldError(f"fichier trop gros (plus de {MAX_APWORLD_SIZE // 1024 // 1024} Mo).")
-            content = await attachment.read()
-            apworld = read_apworld(content, user_id)
+            apworld, content = await _read_apworld(attachment, user_id)
             async with self._lock:
                 if self.get(game.id or 0) is None:
                     raise ApworldError("les inscriptions de cette partie sont fermées.")
@@ -254,11 +262,48 @@ class GameManager:
         async with self._lock:
             if self.get(game.id or 0) is None:
                 raise UserError("Les inscriptions de cette partie sont fermées.")
-            apworld = await self.apworlds.get(game.guild_id, apworld_id)
-            if apworld is None:
-                raise UserError("Cet apworld n'existe plus.")
-            await self.apworlds.attach(game.id or 0, apworld, user_id)
+            apworld = await self._attach(game, user_id, apworld_id)
         await self.refresh(game)
+        return apworld
+
+    async def add_apworld(self, guild_id: int, user_id: int, attachment: discord.Attachment) -> Apworld:
+        """Into this server's library, outside any game."""
+        apworld, content = await _read_apworld(attachment, user_id)
+        return await self.apworlds.add(guild_id, apworld, content)
+
+    async def import_apworlds(self, guild_id: int, messages: Iterable[discord.Message]) -> ApworldImport:
+        """The apworlds attached to these messages, oldest first: the library offers the newest first."""
+        result = ApworldImport()
+        known = await self.apworlds.hashes(guild_id)
+        for message in messages:
+            for attachment in message.attachments:
+                if not is_apworld_filename(attachment.filename):
+                    continue
+                try:
+                    apworld, content = await _read_apworld(attachment, message.author.id)
+                except ApworldError as e:
+                    result.refused.append((attachment.filename, str(e)))
+                    continue
+                except discord.HTTPException:
+                    result.refused.append((attachment.filename, "impossible de télécharger le fichier."))
+                    continue
+                if apworld.sha256 in known:
+                    result.known += 1
+                    continue
+                apworld.uploaded_at = message.created_at
+                result.added.append(await self.apworlds.add(guild_id, apworld, content))
+                known.add(apworld.sha256)
+        return result
+
+    async def set_apworld(self, game: GameRecord, user_id: int, apworld_id: int) -> Apworld:
+        """After the start: which apworld generated a world, to regenerate the seed."""
+        return await self._attach(game, user_id, apworld_id)
+
+    async def _attach(self, game: GameRecord, user_id: int, apworld_id: int) -> Apworld:
+        apworld = await self.apworlds.get(game.guild_id, apworld_id)
+        if apworld is None:
+            raise UserError("Cet apworld n'existe plus.")
+        await self.apworlds.attach(game.id or 0, apworld, user_id)
         return apworld
 
     async def remove_apworld(self, game: GameRecord, user_id: int, apworld_id: int) -> None:
@@ -276,8 +321,8 @@ class GameManager:
             await self.repo.remove_yaml(yaml_id)
         await self.refresh(game)
 
-    async def bundle(self, game: GameRecord, limit: int) -> Bundle:
-        """Everything to generate, laid out like the Archipelago folder, split in zips that fit under `limit`."""
+    async def entries(self, game: GameRecord) -> tuple[list[tuple[str, bytes]], list[YamlFile], list[Attached]]:
+        """Everything to generate, laid out like the Archipelago folder."""
         files = await self.files(game)
         attached = await self.attached(game)
         contents = await self.apworlds.contents(a.apworld.id for a in attached if a.apworld.id is not None)
@@ -289,6 +334,19 @@ class GameManager:
             (f"custom_worlds/{name}", contents[a.apworld.id or 0])
             for name, a in zip(unique_filenames([a.apworld.filename for a in attached]), attached, strict=True)
         ]
+        return entries, files, attached
+
+    async def generation_files(self, thread_id: int) -> list[tuple[str, bytes]] | None:
+        """What generated the room tracked in this post, if it was started from a sign-up post."""
+        game = await self.repo.started_in(thread_id)
+        if game is None:
+            return None
+        entries, files, _ = await self.entries(game)
+        return entries if files else None
+
+    async def bundle(self, game: GameRecord, limit: int) -> Bundle:
+        """Everything to generate, split in zips that fit under `limit`."""
+        entries, files, attached = await self.entries(game)
         parts: list[list[tuple[str, bytes]]] = [[]]
         size = 0
         for entry in entries:
@@ -358,6 +416,13 @@ class GameManager:
             await self.repo.set_status(game, "cancelled")
         except Exception:
             log.exception("Could not cancel game %s", game.id)
+
+
+async def _read_apworld(attachment: discord.Attachment, user_id: int) -> tuple[Apworld, bytes]:
+    if attachment.size > MAX_APWORLD_SIZE:
+        raise ApworldError(f"fichier trop gros (plus de {MAX_APWORLD_SIZE // 1024 // 1024} Mo).")
+    content = await attachment.read()
+    return read_apworld(content, user_id), content
 
 
 def _zip(entries: list[tuple[str, bytes]]) -> bytes:

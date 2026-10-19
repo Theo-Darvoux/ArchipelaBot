@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from ..ap.protocol import ItemFlags
 from ..ap.webhost import WebhostRoom
+from ..core.logic import LogicSetup
 from .db import Database
 
 type RoomStatus = Literal["active", "finished", "stopped"]
@@ -46,6 +47,7 @@ class RoomRecord:
     status: RoomStatus = "active"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(microsecond=0))
     ended_at: datetime | None = None
+    logic: LogicSetup | None = None
     id: int | None = None
 
 
@@ -91,6 +93,16 @@ class RoomRepo:
     async def save_password(self, room: RoomRecord) -> None:
         await self._update(room, "password = ?", room.password)
 
+    async def save_logic(self, room: RoomRecord) -> None:
+        logic = room.logic
+        await self._update(
+            room,
+            "logic_seed = ?, logic_plando = ?, logic_fingerprint = ?",
+            logic and str(logic.seed),
+            logic and logic.plando,
+            logic and logic.fingerprint,
+        )
+
     async def set_status(self, room: RoomRecord, status: RoomStatus) -> None:
         room.status = status
         room.ended_at = datetime.now(UTC).replace(microsecond=0) if status != "active" else None
@@ -123,6 +135,9 @@ class RoomRepo:
                 created_by=row["created_by"],
                 created_at=_parse_utc(row["created_at"]),
                 ended_at=_parse_utc(row["ended_at"]) if row["ended_at"] else None,
+                logic=LogicSetup(int(row["logic_seed"]), row["logic_plando"], row["logic_fingerprint"])
+                if row["logic_seed"]
+                else None,
             )
             for row in rows
         ]

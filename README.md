@@ -24,12 +24,15 @@ les événements importants et le pont de chat.
 | Commande | Effet |
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
-| `/config forum` · `recap` · `annonces` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre |
+| `/config forum` · `recap` · `annonces` · `apworlds` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre. `apworlds` : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties |
 | `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
 | `/partie annuler` | Dans le post d'une partie en inscriptions : l'annuler (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
 | `/partie modifier [nom] [debut] [description]` | Dans le post d'une partie en inscriptions : changer ses infos (`-` pour retirer la date ou la description). Réservé à qui l'a annoncée et aux modérateurs |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
 | `/track reglages` | Dans le post d'une room : choisir ce qui est affiché |
+| `/track logique spoiler:<fichier>` | Dans le post d'une room lancée depuis une partie : avec le spoiler log de la génération, le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique (voir plus bas). Réservé à qui a lancé le suivi et aux modérateurs |
+| `/track apworlds` | Dans le post d'une room lancée depuis une partie : choisir, jeu par jeu, l'apworld qui a servi à générer, parmi ceux du serveur (pour une partie d'avant la gestion des apworlds, ou pour corriger une version). Réservé à qui a lancé le suivi et aux modérateurs |
+| `/apworld envoyer fichier:<.apworld>` | Ajouter un apworld au serveur hors d'une partie : il est ensuite proposé dans les inscriptions et dans `/track apworlds` |
 | `/track reconnect [mot_de_passe]` | Dans le post d'une room : relancer la connexion tout de suite (par exemple après un refus du serveur), en changeant le mot de passe si besoin |
 | `/track stop` | Dans le post d'une room : arrêter le suivi, avec ou sans récap. Dans le post d'une partie, propose aussi de revenir aux inscriptions (mauvais lien, partie à regénérer) : le suivi est oublié, les yamls restent |
 | `/claim slot:<joueur>` · `/unclaim` | Dans le post d'une room : dire quel slot tu joues (ou bouton « Je joue » du panneau) |
@@ -73,6 +76,27 @@ instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une 
    le post ne lance rien : pas de risque de suivre la mauvaise room.
 
 Le bot supprime le message « a épinglé un message » qui suit l'épinglage du panneau.
+
+## Bloqués et checks en logique
+
+Le serveur Archipelago ne connaît pas la logique des jeux : pour savoir à coup sûr qui est bloqué, le bot regénère
+la seed avec Archipelago, à partir des yamls et apworlds du post et de la seed indiquée dans le spoiler log
+(`AP_…_Spoiler.txt`, ou le zip `AP_….zip` qui le contient), envoyé avec `/track logique` (réponse visible seulement
+par toi : le spoiler reste privé). Il vérifie que la regénération donne exactement les mêmes items que la room, puis
+après chaque check calcule, avec les items reçus par chacun :
+
+- 🔓 **N checks en logique** : les checks que le joueur peut faire tout de suite ;
+- 🔒 **bloqué** : aucun check ni l'objectif en logique, il doit attendre des items des autres.
+
+Il faut les yamls et apworlds exacts de la génération, la même version d'Archipelago que le bot, et une partie
+générée hors race mode. Pour une partie générée sur archipelago.gg à partir des yamls, les options `random` des yamls
+ne sont pas reproductibles : la vérification échouera. « En logique » ne compte pas les astuces hors logique.
+
+Côté bot, il faut une installation d'Archipelago (`ARCHIPELAGO_PATH` dans le `.env`, avec son Python dans
+`.venv/bin/python` ou `ARCHIPELAGO_PYTHON`) ; l'image Docker l'inclut. **Attention** : la regénération exécute le
+code des apworlds envoyés dans le post, sur la machine du bot, dans un processus à part sans les variables
+d'environnement du bot (le token Discord n'y est pas), mais avec les mêmes droits sur les fichiers. N'active pas la
+logique pour une partie si tu n'as pas confiance dans ses apworlds.
 
 ## Pont de chat
 

@@ -56,7 +56,7 @@ def test_panel_before_the_first_sync_and_offline():
 
 def test_huge_rooms_fit_in_one_message():
     state, progress = make_room(players=300)
-    text = roster(state, progress, {})
+    text = roster(state, progress, {}, {})
     assert len(text) <= ROSTER_BUDGET
     assert text.endswith("autres · `/status joueur:` pour le détail")
 

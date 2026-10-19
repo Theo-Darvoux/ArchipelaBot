@@ -34,9 +34,14 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
         f"{cmd('claim')} · {cmd('unclaim')} : indiquer ou libérer ton slot\n"
         f"{cmd('track reglages')} : choisir ce qui s'affiche dans le fil\n"
         f"{cmd('track reconnect')} : relancer la connexion (ou changer le mot de passe)\n"
+        f"{cmd('track logique')} : avec le spoiler log, le panneau montre qui est {E.blocked} bloqué et combien de "
+        "checks chacun peut faire (partie lancée depuis son post d'inscriptions)\n"
+        f"{cmd('track apworlds')} : choisir après coup les apworlds de la partie, parmi ceux envoyés au serveur "
+        f"(dans les inscriptions ou avec {cmd('apworld envoyer')})\n"
         f"{cmd('recap')} : publier le récap (podium, chiffres, graphique), même après l'arrêt\n"
         f"{cmd('track stop')} : arrêter le suivi, ou revenir aux inscriptions après un mauvais lien\n"
-        "-# Réglages, reconnexion, récap et arrêt : la personne qui a lancé le suivi ou un modérateur."
+        "-# Réglages, reconnexion, logique, apworlds, récap et arrêt : la personne qui a lancé le suivi ou un "
+        "modérateur."
     )
     notifs = (
         f"### {E.notif_thread} Notifications\n"
@@ -45,7 +50,9 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
     )
     admin = (
         f"### {E.settings} Admins\n"
-        f"{cmd('config forum')} · {cmd('config recap')} · {cmd('config annonces')} · {cmd('config voir')}\n"
+        f"{cmd('config forum')} · {cmd('config recap')} · {cmd('config annonces')} · {cmd('config apworlds')} · "
+        f"{cmd('config voir')}\n"
+        "-# Le salon d'apworlds : le bot reprend ceux qui y sont postés, et les propose ensuite dans les parties.\n"
         "-# Réservé à la permission *Gérer le serveur*."
     )
 

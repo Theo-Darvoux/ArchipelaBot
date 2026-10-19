@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from datetime import UTC
 from typing import Any
 
 from ..core.apworlds import Apworld, Attached
@@ -15,17 +16,22 @@ class ApworldRepo:
         self.db = db
 
     async def add(self, guild_id: int, apworld: Apworld, content: bytes) -> Apworld:
+        at = apworld.uploaded_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S") if apworld.uploaded_at else None
         await self.db.conn.execute(
             """
-            INSERT INTO apworld (guild_id, game, module, version, sha256, uploaded_by, content)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO apworld (guild_id, game, module, version, sha256, uploaded_by, uploaded_at, content)
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?)
             ON CONFLICT (guild_id, sha256) DO NOTHING
             """,
-            (guild_id, apworld.game, apworld.module, apworld.version, apworld.sha256, apworld.uploaded_by, content),
+            (guild_id, apworld.game, apworld.module, apworld.version, apworld.sha256, apworld.uploaded_by, at, content),
         )
         await self.db.conn.commit()
         [stored] = await self._select("WHERE a.guild_id = ? AND a.sha256 = ?", guild_id, apworld.sha256)
         return stored
+
+    async def hashes(self, guild_id: int) -> set[str]:
+        async with self.db.conn.execute("SELECT sha256 FROM apworld WHERE guild_id = ?", (guild_id,)) as cur:
+            return {row["sha256"] for row in await cur.fetchall()}
 
     async def get(self, guild_id: int, apworld_id: int) -> Apworld | None:
         rows = await self._select("WHERE a.guild_id = ? AND a.id = ?", guild_id, apworld_id)

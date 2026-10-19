@@ -13,10 +13,11 @@ from zoneinfo import ZoneInfo
 import discord
 from discord import ui
 
-from ..ap.client import ConnectOptions
+from ..ap.client import APError, ConnectOptions
 from ..ap.webhost import RoomNotFound, WebhostError
 from ..core import events as ev
 from ..core.chat import ChatRelay
+from ..core.logic import Generated, LogicError, LogicSetup, LogicWorker, Spoiler, check_room, scout_world
 from ..core.progress import Baseline, Progress, direct_baseline, webhost_baseline
 from ..core.room import AddressResolver, RoomState, RoomTracker, SlotInfo, Waker
 from ..errors import UserError
@@ -25,6 +26,7 @@ from ..recap.stats import Recap, build_recap
 from ..storage.claims import ClaimRepo, NotifMode, NotifPrefs
 from ..storage.history import HistoryRepo
 from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
+from .components import Tone, notice
 from .emojis import E
 from .forum import TAG_SPECS, Post, RoomTag, ensure_room_tags
 from .panel_buttons import ClaimButton, MyHintsButton, SettingsButton
@@ -33,6 +35,7 @@ from .render.panel import panel_view
 from .render.recap import CHART_FILENAME, recap_view
 from .render.text import md
 from .services.feed import FeedMessage, FeedService
+from .services.logic import LogicService
 from .services.notify import NotifyService
 from .services.panel import PanelService
 from .services.presence import Presence
@@ -147,7 +150,7 @@ class RoomRuntime:
             self.progress,
             self.history,
             self.fetch_baseline,
-            lambda urgent: self.panel.request_update(urgent=urgent),
+            self._progress_changed,
             periodic=self.record.webhost is not None,
         )
         self.presence = Presence(self.tracker.state)
@@ -164,6 +167,13 @@ class RoomRuntime:
         )
         self.panel = PanelService(self.render_panel, self.sink.edit_panel)
         self.chat = ChatRelay(self.tracker, self.record.password)
+        self.logic = LogicService(
+            self.tracker.state, self.progress, self.progress_service.sync, lambda: self.panel.request_update()
+        )
+
+    def _progress_changed(self, urgent: bool) -> None:
+        self.panel.request_update(urgent=urgent)
+        self.logic.request()
 
     def worth_waking(self, now: datetime | None = None) -> bool:
         last = self.progress_service.last_activity
@@ -195,6 +205,7 @@ class RoomRuntime:
             self.progress,
             since=self.record.created_at,
             claims=self.claims,
+            logic=self.logic.results if self.active else None,
             page_url=webhost.page_url if webhost else None,
             buttons=self._buttons(ClaimButton, MyHintsButton, SettingsButton) if buttons else None,
         )
@@ -351,8 +362,11 @@ class RoomManager:
             asyncio.create_task(runtime.notify.run(), name=f"notify {record.id}"),
             asyncio.create_task(runtime.panel.run(), name=f"panel {record.id}"),
             asyncio.create_task(runtime.chat.run(), name=f"chat {record.id}"),
+            asyncio.create_task(runtime.logic.run(), name=f"logic {record.id}"),
             asyncio.create_task(self._watch(runtime), name=f"watch {record.id}"),
         ]
+        if record.logic:
+            runtime.tasks.append(asyncio.create_task(self._resume_logic(runtime), name=f"resume logic {record.id}"))
         try:
             await runtime.sink.pin_panel()
         except discord.HTTPException:
@@ -372,6 +386,75 @@ class RoomManager:
 
             return fetch
         return lambda: direct_baseline(state.address, record.password, state)
+
+    async def _regenerate(self, runtime: RoomRuntime, seed: int, plando: str) -> tuple[LogicWorker, Generated]:
+        settings = self.bot.settings
+        if settings.archipelago_path is None or settings.logic_python is None:
+            raise LogicError("Archipelago n'est pas installé avec ce bot : la logique n'est pas disponible.")
+        files = await self.bot.games.generation_files(runtime.record.thread_id or 0)
+        if files is None:
+            raise LogicError(
+                "Il faut les yamls de la partie : la logique ne marche que pour une room lancée depuis le post d'une "
+                "partie (`/partie nouvelle`)."
+            )
+        worker, generated = await LogicWorker.start(
+            settings.logic_python, settings.archipelago_path, seed, plando, files
+        )
+        try:
+            check_room(generated, runtime.tracker.state)
+        except BaseException:
+            await worker.close()
+            raise
+        return worker, generated
+
+    async def enable_logic(self, runtime: RoomRuntime, spoiler: Spoiler) -> None:
+        """Regenerate the room's seed from its post's yamls and apworlds, check it's the same, then use it."""
+        worker, generated = await self._regenerate(runtime, spoiler.seed, spoiler.plando)
+        try:
+            record = runtime.record
+            try:
+                expected = await scout_world(runtime.tracker.state.address, record.password, record.slot)
+            except (APError, TimeoutError) as e:
+                raise LogicError(
+                    "Impossible de joindre la room pour vérifier la regénération. Réessaie plus tard."
+                ) from e
+            slot = runtime.tracker.state.slot_by_name(record.slot)
+            if slot is None or await worker.placements(slot) != expected:
+                versions = f"spoiler : {spoiler.version}, bot : {generated.version}"
+                raise LogicError(
+                    "La regénération ne donne pas les mêmes items que la room : yamls, apworlds ou version "
+                    f"d'Archipelago différents ({versions})."
+                )
+        except BaseException:
+            await worker.close()
+            raise
+        record.logic = LogicSetup(spoiler.seed, spoiler.plando, generated.fingerprint)
+        await self.repo.save_logic(record)
+        await runtime.logic.use(worker)
+        runtime.panel.request_update(urgent=True)
+
+    async def _resume_logic(self, runtime: RoomRuntime) -> None:
+        record = runtime.record
+        assert record.logic is not None
+        try:
+            worker, generated = await self._regenerate(runtime, record.logic.seed, record.logic.plando)
+        except LogicError as e:
+            log.warning("Could not regenerate room %s: %s", record.id, e)
+            return
+        if generated.fingerprint != record.logic.fingerprint:
+            await worker.close()
+            log.warning("Room %s no longer regenerates the same (Archipelago %s)", record.id, generated.version)
+            record.logic = None
+            await self.repo.save_logic(record)
+            text = (
+                f"{E.error} Bloqués et checks en logique désactivés : la seed ne se regénère plus pareil "
+                f"(Archipelago {generated.version} sur le bot). Renvoie le spoiler avec `/track logique`."
+            )
+            with contextlib.suppress(discord.HTTPException):
+                await runtime.sink.send_view(notice(text, Tone.ERROR))
+            return
+        await runtime.logic.use(worker)
+        runtime.panel.request_update()
 
     async def _watch(self, runtime: RoomRuntime) -> None:
         while True:
@@ -524,6 +607,7 @@ class RoomManager:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        await runtime.logic.close()
         for flush in (runtime.feed.flush, runtime.notify.flush, runtime.progress_service.snapshot):
             try:
                 await flush()

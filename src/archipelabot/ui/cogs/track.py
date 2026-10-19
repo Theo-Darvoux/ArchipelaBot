@@ -5,12 +5,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ...core.logic import MAX_SPOILER, LogicError, read_spoiler
 from ...errors import UserError
+from ..apworlds import GameApworldsView
 from ..components import Tone, notice
 from ..emojis import E
 from ..forum import TAG_SPECS, RoomTag
 from ..launch import launch_room
-from ..render.text import plural
+from ..render.text import md, plural
 from ..rooms import RoomRuntime
 from ..types import Interaction
 from ..views import ConfirmView
@@ -135,6 +137,40 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         await self.bot.rooms.reconnect(runtime, mot_de_passe)
         text = f"{E.reconnecting} Reconnexion lancée : le panneau de la room affiche le résultat."
         await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
+
+    @app_commands.command(name="logique", description="Savoir qui est bloqué et combien de checks chacun peut faire")
+    @app_commands.describe(spoiler="Le spoiler log de la génération (AP_…_Spoiler.txt) ou le zip AP_….zip")
+    async def logic(self, interaction: Interaction, spoiler: discord.Attachment) -> None:
+        runtime = self._room_here(interaction)
+        self._check_manager(interaction, runtime)
+        if spoiler.size > MAX_SPOILER:
+            raise UserError(f"Fichier trop gros (plus de {MAX_SPOILER // 1024 // 1024} Mo).")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await self.bot.rooms.enable_logic(runtime, read_spoiler(spoiler.filename, await spoiler.read()))
+        except LogicError as e:
+            raise UserError(str(e)) from e
+        except discord.HTTPException as e:
+            raise UserError("Impossible de télécharger le fichier.") from e
+        results = runtime.logic.results
+        blocked = [md(runtime.tracker.state.name(slot)) for slot, r in results.items() if r.blocked]
+        text = (
+            f"{E.reachable} Logique activée : le panneau montre maintenant qui est bloqué et combien de checks chacun "
+            "peut faire, d'après la logique du jeu."
+        )
+        if blocked:
+            text += f"\n-# Bloqués en ce moment : {', '.join(blocked)}."
+        await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
+
+    @app_commands.command(name="apworlds", description="Choisir les apworlds qui ont servi à générer cette partie")
+    async def apworlds(self, interaction: Interaction) -> None:
+        runtime = self._room_here(interaction)
+        self._check_manager(interaction, runtime)
+        game = await self.bot.games.repo.started_in(runtime.record.thread_id or 0)
+        if game is None:
+            raise UserError("Seulement pour une room lancée depuis le post d'une partie (`/partie nouvelle`).")
+        view = await GameApworldsView.create(self.bot.games, game)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
     @app_commands.command(name="reglages", description="Choisir ce qui est affiché dans le fil de cette room")
     async def settings(self, interaction: Interaction) -> None:

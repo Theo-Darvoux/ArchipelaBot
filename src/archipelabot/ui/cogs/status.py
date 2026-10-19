@@ -39,11 +39,11 @@ class StatusCog(commands.Cog, name="status"):
             return
 
         await interaction.response.send_message(
-            view=player_status_view(slots[0], state, progress, runtime.claims), ephemeral=True
+            view=player_status_view(slots[0], state, progress, runtime.claims, runtime.logic.results), ephemeral=True
         )
         for slot in slots[1:]:
             await interaction.followup.send(
-                view=player_status_view(slot, state, progress, runtime.claims), ephemeral=True
+                view=player_status_view(slot, state, progress, runtime.claims, runtime.logic.results), ephemeral=True
             )
 
     @app_commands.command(name="hints", description="Les hints de cette room (visibles seulement par toi)")

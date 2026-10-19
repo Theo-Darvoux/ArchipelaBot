@@ -31,6 +31,7 @@ EXTENSIONS = (
     "archipelabot.ui.cogs.config",
     "archipelabot.ui.cogs.track",
     "archipelabot.ui.cogs.game",
+    "archipelabot.ui.cogs.apworld",
     "archipelabot.ui.cogs.claim",
     "archipelabot.ui.cogs.status",
     "archipelabot.ui.cogs.bridge",

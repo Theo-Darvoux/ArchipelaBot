@@ -51,6 +51,8 @@ FALLBACKS: dict[str, str] = {
     "apworld": "🧩",
     "random": "🎲",
     "calendar": "📅",
+    "blocked": "🔒",
+    "reachable": "🔓",
 }
 
 

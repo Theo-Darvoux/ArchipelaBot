@@ -136,6 +136,14 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (game_id, apworld_id)
     );
     """,
+    """
+    ALTER TABLE room ADD COLUMN logic_seed TEXT;       -- seeds don't fit in 64 bits
+    ALTER TABLE room ADD COLUMN logic_plando TEXT;
+    ALTER TABLE room ADD COLUMN logic_fingerprint TEXT;
+    """,
+    """
+    ALTER TABLE guild_config ADD COLUMN apworld_channel_id INTEGER;
+    """,
 ]
 
 

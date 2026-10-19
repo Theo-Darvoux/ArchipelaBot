@@ -437,3 +437,62 @@ async def test_big_bundles_are_split(bot, game):
     assert (bundle.yamls, bundle.apworlds) == (1, 2)
     names = [zipfile.ZipFile(io.BytesIO(part)).namelist() for part in bundle.parts]
     assert names == [["Players/a.yaml", "custom_worlds/hacknet.apworld"], ["custom_worlds/tunic.apworld"]]
+
+
+async def test_apworlds_sent_outside_a_game(bot, game):
+    record, _ = game
+    bot.games.core.games = frozenset({"Celeste"})
+    cog = bot.get_cog("apworld")
+    interaction = FakeInteraction(user=FakeUser(id=3))
+    await cog.send.callback(cog, interaction, fichier=FakeAttachment("Hacknet_1.apworld", apworld()))
+    assert "`hacknet` v0.3.1 · *Hacknet* est sur le serveur" in view_text(interaction.followup.sent[0]["view"])
+    assert [a.uploaded_by for a in await bot.games.apworlds.library(1, ["Hacknet"])] == [3]
+    assert await bot.games.attached(record) == []
+
+    with pytest.raises(UserError, match="Apworld refusé : ce n'est pas un apworld valide"):
+        await cog.send.callback(cog, FakeInteraction(), fichier=FakeAttachment("x.apworld", b""))
+
+    await bot.games.upload(record, 1, [FakeAttachment("a.yaml", yaml("A", "Hacknet"))])
+    report = await UploadReport.create(bot.games, record, 1, [])
+    assert "Utiliser hacknet v0.3.1" in parts_of(report)
+
+
+@requires_ap_server
+async def test_apworlds_chosen_after_the_start(bot, game, ap_server):
+    record, thread = game
+    bot.games.core.games = frozenset({"Celeste 64"})
+    await bot.games.upload(record, 1, [FakeAttachment("p1.yaml", (DEV_DIR / "players" / "p1.yaml").read_bytes())])
+    await bot.games.upload(record, 2, [FakeAttachment("b.yaml", yaml("B", "Hacknet"))])
+    track = bot.get_cog("track")
+    start = {"lien": ap_server.address, "slot": "Carol", "mot_de_passe": None, "nom": None}
+    await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
+
+    with pytest.raises(UserError, match="Seule la personne"):
+        await track.apworlds.callback(track, FakeInteraction(channel_id=thread.id, user=FakeUser(id=2)))
+    interaction = click(bot, channel_id=thread.id)
+    await track.apworlds.callback(track, interaction)
+    view = interaction.response.sent[0]["view"]
+    assert "⚠️ *Hacknet* · apworld manquant · <@2>" in view_text(view) and "Aucun apworld de ce jeu" in view_text(view)
+    assert "Celeste 64" not in view_text(view) and not parts_of(view)
+
+    apworld_cog = bot.get_cog("apworld")
+    for version in ("0.3.0", "0.3.1"):
+        attachment = FakeAttachment("hacknet.apworld", apworld(version=version))
+        await apworld_cog.send.callback(apworld_cog, FakeInteraction(user=FakeUser(id=9)), fichier=attachment)
+    interaction = click(bot, channel_id=thread.id)
+    await track.apworlds.callback(track, interaction)
+    view = interaction.response.sent[0]["view"]
+    select = parts_of(view)["Choisir l'apworld de Hacknet"]
+    assert [o.label for o in select.options] == ["hacknet v0.3.1", "hacknet v0.3.0"]
+    assert not any(o.default for o in select.options)
+    select._values = [select.options[1].value]
+    pick = click(bot)
+    await select.callback(pick)
+    [attached] = await bot.games.attached(record)
+    assert (attached.apworld.version, attached.user_id) == ("0.3.0", 2)
+    assert "`hacknet` v0.3.0 · *Hacknet* · <@2>" in view_text(pick.response.sent[0]["view"])
+    assert [o.default for o in parts_of(view)["Choisir l'apworld de Hacknet"].options] == [False, True]
+    assert (await bot.games.generation_files(thread.id))[-1] == (
+        "custom_worlds/hacknet.apworld",
+        apworld(version="0.3.0"),
+    )

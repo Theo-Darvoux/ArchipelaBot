@@ -3,14 +3,17 @@
 import discord
 from discord import ui
 
+from ...core.logic import SlotLogic
 from ...core.progress import Progress
 from ...core.room import RoomState
 from ..emojis import E
-from .panel import percent, presence
+from .panel import in_logic, percent, presence
 from .text import item_emoji, md, plural
 
 
-def player_status_view(slot: int, state: RoomState, progress: Progress, claims: dict[int, int]) -> ui.LayoutView:
+def player_status_view(
+    slot: int, state: RoomState, progress: Progress, claims: dict[int, int], logic: dict[int, SlotLogic] | None = None
+) -> ui.LayoutView:
     p = progress[slot]
     subtitle = f"*{md(state.game(slot))}*" + (f" · joué par <@{claims[slot]}>" if slot in claims else "")
     checks = f"{p.done} / {p.total} checks" if p.total else plural(p.done, "check")
@@ -19,6 +22,8 @@ def player_status_view(slot: int, state: RoomState, progress: Progress, claims: 
         details.append("objectif atteint" + (f" {discord.utils.format_dt(p.goal_at, 'R')}" if p.goal_at else ""))
     elif here := presence(slot, state, progress):
         details.append(f"{here} en jeu" if here == E.online else here)
+    if doable := in_logic(slot, progress, logic or {}):
+        details.append(doable)
     if p.deaths:
         details.append(f"{E.death} {plural(p.deaths, 'mort')}")
 

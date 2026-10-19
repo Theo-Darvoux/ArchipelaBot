@@ -51,6 +51,7 @@ class Progress:
     def __init__(self, state: RoomState, clock: Callable[[], datetime] = utcnow) -> None:
         self.state = state
         self.clock = clock
+        self.synced = False  # every checked location is known, not just counted
         self._slots: dict[int, SlotProgress] = {}
 
     def __getitem__(self, slot: int) -> SlotProgress:
@@ -119,6 +120,7 @@ class Progress:
             progress = self[slot]
             if progress.last_check is None or at > progress.last_check:
                 progress.last_check = at
+        self.synced = True
 
 
 async def webhost_baseline(

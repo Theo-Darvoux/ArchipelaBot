@@ -71,6 +71,22 @@ async def test_new_game_needs_a_forum(bot, discord_env):  # noqa: F811
         await new_game(bot, guild)
 
 
+async def test_creation_can_be_restricted_to_admins(bot, discord_env):  # noqa: F811
+    guild, forum = discord_env
+    await bot.guild_configs.save(GuildConfig(guild.id, forum_id=forum.id, admin_only_games=True))
+    with pytest.raises(UserError, match="seuls les admins"):
+        await new_game(bot, guild)
+    track = bot.get_cog("track")
+    with pytest.raises(UserError, match="seuls les admins"):
+        await track.start.callback(track, FakeInteraction(guild=guild), lien="localhost:38281", slot="Carol")
+    assert forum.threads == []
+
+    cog = bot.get_cog("partie")
+    admin = FakeInteraction(guild=guild, permissions=discord.Permissions(manage_guild=True))
+    await cog.new.callback(cog, admin, nom="Samedi", debut=None, description=None)
+    assert len(forum.threads) == 1
+
+
 async def test_yamls_fill_the_panel(bot, game):
     record, thread = game
     uploads = await bot.games.upload(

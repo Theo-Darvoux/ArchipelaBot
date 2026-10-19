@@ -144,6 +144,9 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE guild_config ADD COLUMN apworld_channel_id INTEGER;
     """,
+    """
+    ALTER TABLE guild_config ADD COLUMN admin_only_games INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

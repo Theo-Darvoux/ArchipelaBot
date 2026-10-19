@@ -1,14 +1,18 @@
 from typing import TYPE_CHECKING
 
+import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ...core.logic import blame
 from ...errors import UserError
 from ..autocomplete import slot_autocomplete
 from ..components import Tone, notice
+from ..emojis import E
 from ..panel_buttons import hints_for
 from ..render.hints import player_hints_view
 from ..render.status import player_status_view
+from ..render.text import md
 from ..rooms import can_manage
 from ..types import Interaction
 
@@ -60,6 +64,33 @@ class StatusCog(commands.Cog, name="status"):
             slot = runtime.slot_named(joueur)
             view = player_hints_view([slot], runtime.tracker.state, you=runtime.claims.get(slot) == interaction.user.id)
         await interaction.response.send_message(view=view, ephemeral=True)
+
+    @app_commands.command(name="blame", description="Désigner qui bloque le plus de monde dans cette room")
+    @app_commands.guild_only()
+    async def blame(self, interaction: Interaction) -> None:
+        runtime = self.bot.rooms.by_thread(interaction.channel_id)
+        if runtime is None:
+            raise UserError("Utilise cette commande dans le post d'une room suivie.")
+        if not runtime.logic.active:
+            raise UserError(f"Il faut d'abord envoyer le spoiler log avec {self.bot.command_mention('track logique')}.")
+        state, results = runtime.tracker.state, runtime.logic.results
+        found = blame(results)
+        if found is None:
+            text = (
+                "Personne ne bloque personne : les bloqués attendent des items que personne ne peut encore atteindre."
+                if any(r.blocked for r in results.values())
+                else "Personne n'est bloqué en ce moment."
+            )
+            await interaction.response.send_message(view=notice(f"{E.reachable} {text}"), ephemeral=True)
+            return
+        culprit, victims = found
+        user = runtime.claims.get(culprit)
+        who = f"<@{user}>" if user is not None else f"**{md(state.name(culprit))}**"
+        names = ", ".join(md(state.name(slot)) for slot in sorted(victims, key=state.name))
+        wait = "attend" if len(victims) == 1 else "attendent"
+        text = f"{E.blocked} {who}, c'est TOI qui bloque tout le monde !!!\n-# {names} {wait} tes items."
+        allowed = discord.AllowedMentions(users=[discord.Object(user)] if user is not None else False)
+        await interaction.response.send_message(view=notice(text, Tone.ERROR), allowed_mentions=allowed)
 
     @app_commands.command(name="recap", description="Publier le récap de cette room dans son post")
     @app_commands.guild_only()

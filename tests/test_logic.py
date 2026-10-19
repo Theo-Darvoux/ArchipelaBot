@@ -4,7 +4,7 @@ import zipfile
 import pytest
 
 from archipelabot.core import events as ev
-from archipelabot.core.logic import Generated, LogicError, LogicWorker, SlotLogic, check_room, read_spoiler
+from archipelabot.core.logic import Generated, LogicError, LogicWorker, SlotLogic, blame, check_room, read_spoiler
 from archipelabot.core.progress import Baseline
 from archipelabot.core.room import RoomState, SlotInfo
 from archipelabot.errors import UserError
@@ -82,6 +82,21 @@ def test_panel_shows_who_is_blocked():
     assert "🔓 3 checks en logique" in view_text(player_status_view(1, state, progress, {}, logic))
 
 
+def test_blame_goes_to_who_holds_items_for_the_most_blocked_players():
+    logic = {
+        1: SlotLogic(frozenset({10}), False, (2, 2, 2, 4)),
+        2: SlotLogic(frozenset(), False),
+        3: SlotLogic(frozenset({11}), False, (2, 4, 1)),
+        4: SlotLogic(frozenset(), False),
+        5: SlotLogic(frozenset({12}), False, (1, 1, 1, 1, 1)),
+    }
+    assert blame(logic) == (1, {2, 4})  # Carol has as many victims, Alice more of their items
+
+    assert blame({**logic, 3: SlotLogic(frozenset({11}), False, (2, 4, 4, 2, 4))}) == (3, {2, 4})
+    assert blame({1: logic[1], 2: SlotLogic(frozenset(), True), 4: SlotLogic(frozenset({13}), False)}) is None
+    assert blame({2: logic[2], 5: logic[5]}) is None
+
+
 async def start_dev_worker(files=None):
     files = files or [(f"Players/{p.name}", p.read_bytes()) for p in sorted((DEV_DIR / "players").glob("*.yaml"))]
     return await LogicWorker.start(AP_DIR / ".venv" / "bin" / "python", AP_DIR, DEV_SEED, DEV_PLANDO, files)
@@ -101,6 +116,7 @@ async def test_playing_only_what_is_in_logic_finishes_the_seed():
         while (carol := (await worker.evaluate(checked))[3]).locations:
             checked[3] |= carol.locations
         assert carol.blocked
+        assert blame(await worker.evaluate(checked)) == (2, {3})  # Bob has Carol's items in logic
 
         # Everyone doing only what is in logic reaches every goal: the logic is the seed's.
         rounds = 0
@@ -144,6 +160,22 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     assert set(runtime.logic.results) == {1, 2, 3} and runtime.record.logic is not None
     assert "en logique" in view_text(runtime.render_panel())
 
+    status = bot.get_cog("status")
+    runtime.logic.results = {
+        1: SlotLogic(frozenset({1}), False, (3,)),
+        2: SlotLogic(frozenset({2}), False, (3, 3)),
+        3: SlotLogic(frozenset(), False),
+    }
+    asker = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=FakeUser(id=5))
+    await status.blame.callback(status, asker)
+    [sent] = asker.response.sent
+    assert view_text(sent["view"]) == "🔒 <@2>, c'est TOI qui bloque tout le monde !!!\n-# Carol attend tes items."
+    assert "ephemeral" not in sent and sent["allowed_mentions"].users[0].id == 2
+    runtime.logic.results = {1: SlotLogic(frozenset({1}), False, (3,)), 2: SlotLogic(frozenset({2}), True)}
+    asker = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=FakeUser(id=5))
+    await status.blame.callback(status, asker)
+    assert "Personne n'est bloqué" in view_text(asker.response.sent[0]["view"])
+
     # After a restart, the seed is regenerated again without asking.
     await bot.rooms.shutdown()
     bot.rooms = RoomManager(bot)
@@ -170,6 +202,9 @@ async def test_logic_needs_the_yamls_and_archipelago(bot, discord_env, ap_server
 
     with pytest.raises(UserError, match="pas installé"):
         await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER))
+    status = bot.get_cog("status")
+    with pytest.raises(UserError, match="spoiler log"):
+        await status.blame.callback(status, here)
     bot.settings.archipelago_path = AP_DIR
     with pytest.raises(UserError, match="Il faut les yamls"):
         await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER))

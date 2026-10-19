@@ -11,6 +11,7 @@ from ..apworlds import GameApworldsView
 from ..components import Tone, notice
 from ..emojis import E
 from ..forum import TAG_SPECS, RoomTag
+from ..games import check_can_create
 from ..launch import launch_room
 from ..render.text import md, plural
 from ..rooms import RoomRuntime
@@ -47,11 +48,13 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
     ) -> None:
         guild = interaction.guild
         assert guild is not None
+        game = self.bot.games.by_thread(interaction.channel_id)
+        if game is None:
+            check_can_create(await self.bot.guild_configs.get(guild.id), interaction.permissions)
         await interaction.response.defer(ephemeral=True, thinking=True)
         runtime, recognised = await launch_room(
-            self.bot, guild, lien, user_id=interaction.user.id, slot=slot, password=mot_de_passe, name=nom,
-            game=self.bot.games.by_thread(interaction.channel_id),
-        )  # fmt: skip
+            self.bot, guild, lien, user_id=interaction.user.id, slot=slot, password=mot_de_passe, name=nom, game=game
+        )
 
         players = runtime.tracker.state.players
         games = {s.game for s in players}

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import discord
 import pytest
+from discord import app_commands
 
 from archipelabot.errors import UserError
 from archipelabot.ui.forum import TAG_SPECS, RoomTag, ensure_room_tags
@@ -171,3 +172,18 @@ async def test_apworld_channel_is_imported_then_followed(bot):
     assert "**Salon des apworlds** : <#8>" in view_text(interaction.replies[0]["view"])
     await cog.set_apworlds.callback(cog, FakeInteraction(), None)
     assert (await bot.guild_configs.get(1)).apworld_channel_id is None
+
+
+async def test_creation_restricted_to_admins_then_reopened(bot):
+    cog = bot.get_cog("config")
+
+    interaction = FakeInteraction()
+    await cog.set_creation.callback(cog, interaction, app_commands.Choice(name="Admins uniquement", value="admins"))
+    assert (await bot.guild_configs.get(1)).admin_only_games
+    assert "Seuls les admins" in view_text(interaction.replies[0]["view"])
+    interaction = FakeInteraction()
+    await cog.show.callback(cog, interaction)
+    assert "**Création des parties** : admins uniquement" in view_text(interaction.replies[0]["view"])
+
+    await cog.set_creation.callback(cog, FakeInteraction(), app_commands.Choice(name="Tous les membres", value="all"))
+    assert not (await bot.guild_configs.get(1)).admin_only_games

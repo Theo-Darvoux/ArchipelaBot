@@ -29,6 +29,7 @@ from ..core.yamls import (
 from ..errors import UserError
 from ..storage.apworlds import ApworldRepo
 from ..storage.games import GameRecord, GameRepo
+from ..storage.guilds import GuildConfig
 from .forum import RoomTag, ensure_room_tags
 from .render.signup import Upload, signup_view
 from .rooms import RoomRuntime, ThreadSink
@@ -45,6 +46,11 @@ ZIP_OVERHEAD = 64 * 1024
 
 def is_signup_file(filename: str) -> bool:
     return is_yaml_filename(filename) or is_apworld_filename(filename)
+
+
+def check_can_create(config: GuildConfig, permissions: discord.Permissions) -> None:
+    if config.admin_only_games and not permissions.manage_guild:
+        raise UserError("Sur ce serveur, seuls les admins peuvent créer des parties.")
 
 
 class CoreGames:

@@ -53,6 +53,7 @@ class LogicSetup:
 class SlotLogic:
     locations: frozenset[int]  # unchecked, in logic with what the player has received
     goal: bool  # the goal is in logic
+    unlocks: tuple[int, ...] = ()  # receiver of each progression item in these locations, other players only
 
     @property
     def accessible(self) -> int:
@@ -61,6 +62,17 @@ class SlotLogic:
     @property
     def blocked(self) -> bool:
         return not self.locations and not self.goal
+
+
+def blame(results: dict[int, SlotLogic]) -> tuple[int, set[int]] | None:
+    """Who holds, in logic, progression items for the most blocked players, and which ones."""
+    blocked = {slot for slot, r in results.items() if r.blocked}
+    victims = {slot: blocked.intersection(r.unlocks) for slot, r in results.items()}
+    keys = {slot: sum(1 for receiver in r.unlocks if receiver in blocked) for slot, r in results.items()}
+    culprit = max(victims, key=lambda slot: (len(victims[slot]), keys[slot]), default=None)
+    if culprit is None or not victims[culprit]:
+        return None
+    return culprit, victims[culprit]
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +174,8 @@ class LogicWorker:
     async def evaluate(self, checked: dict[int, Iterable[int]]) -> dict[int, SlotLogic]:
         answer = await self._request({"cmd": "evaluate", "checked": {s: list(ids) for s, ids in checked.items()}})
         return {
-            int(slot): SlotLogic(frozenset(info["accessible"]), info["goal"]) for slot, info in answer["slots"].items()
+            int(slot): SlotLogic(frozenset(info["accessible"]), info["goal"], tuple(info["unlocks"]))
+            for slot, info in answer["slots"].items()
         }
 
     async def placements(self, slot: int) -> dict[int, tuple[int, int]]:

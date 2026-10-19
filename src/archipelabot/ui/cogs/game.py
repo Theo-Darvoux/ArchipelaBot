@@ -13,7 +13,7 @@ from ...storage.games import GameRecord
 from ..components import Tone, notice
 from ..emojis import E
 from ..forum import TAG_SPECS, RoomTag
-from ..games import is_signup_file
+from ..games import check_can_create, is_signup_file
 from ..render.text import md
 from ..signup_buttons import UploadReport
 from ..types import Interaction
@@ -65,8 +65,9 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
     ) -> None:
         guild = interaction.guild
         assert guild is not None
-        starts_at = self._start(debut) if debut else None
         config = await self.bot.guild_configs.get(guild.id)
+        check_can_create(config, interaction.permissions)
+        starts_at = self._start(debut) if debut else None
         forum = guild.get_channel(config.forum_id) if config.forum_id else None
         if forum is None or forum.type != discord.ChannelType.forum:
             raise UserError("Aucun forum configuré pour les parties. Un admin doit d'abord utiliser `/config forum`.")

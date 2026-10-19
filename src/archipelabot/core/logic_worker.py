@@ -106,13 +106,21 @@ def evaluate(multiworld, checked: dict[str, list[int]]) -> dict[int, dict]:
     result = {}
     for player in multiworld.player_ids:
         checked_here = done.get(player, set())
+        accessible = [
+            loc
+            for loc in multiworld.get_locations(player)
+            if loc.address is not None and loc.address not in checked_here and loc.can_reach(state)
+        ]
         result[player] = {
-            "accessible": [
-                loc.address
-                for loc in multiworld.get_locations(player)
-                if loc.address is not None and loc.address not in checked_here and loc.can_reach(state)
-            ],
+            "accessible": [loc.address for loc in accessible],
             "goal": bool(multiworld.completion_condition[player](state)),
+            "unlocks": [
+                item.player
+                for loc in accessible
+                if loc.item and loc.item.advancement
+                for item in received(multiworld, loc.item)
+                if item.player != player
+            ],
         }
     return result
 

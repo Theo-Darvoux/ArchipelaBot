@@ -10,6 +10,7 @@ class GuildConfig:
     recap_channel_id: int | None = None
     ping_role_id: int | None = None
     apworld_channel_id: int | None = None
+    admin_only_games: bool = False
 
 
 class GuildRepo:
@@ -18,25 +19,40 @@ class GuildRepo:
 
     async def get(self, guild_id: int) -> GuildConfig:
         async with self.db.conn.execute(
-            "SELECT forum_id, recap_channel_id, ping_role_id, apworld_channel_id FROM guild_config WHERE guild_id = ?",
+            "SELECT forum_id, recap_channel_id, ping_role_id, apworld_channel_id, admin_only_games FROM guild_config "
+            "WHERE guild_id = ?",
             (guild_id,),
         ) as cur:
             row = await cur.fetchone()
         if row is None:
             return GuildConfig(guild_id)
         return GuildConfig(
-            guild_id, row["forum_id"], row["recap_channel_id"], row["ping_role_id"], row["apworld_channel_id"]
+            guild_id,
+            row["forum_id"],
+            row["recap_channel_id"],
+            row["ping_role_id"],
+            row["apworld_channel_id"],
+            bool(row["admin_only_games"]),
         )
 
     async def save(self, config: GuildConfig) -> None:
         await self.db.conn.execute(
             """
-            INSERT INTO guild_config (guild_id, forum_id, recap_channel_id, ping_role_id, apworld_channel_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO guild_config
+                (guild_id, forum_id, recap_channel_id, ping_role_id, apworld_channel_id, admin_only_games)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (guild_id) DO UPDATE
                 SET forum_id = excluded.forum_id, recap_channel_id = excluded.recap_channel_id,
-                    ping_role_id = excluded.ping_role_id, apworld_channel_id = excluded.apworld_channel_id
+                    ping_role_id = excluded.ping_role_id, apworld_channel_id = excluded.apworld_channel_id,
+                    admin_only_games = excluded.admin_only_games
             """,
-            (config.guild_id, config.forum_id, config.recap_channel_id, config.ping_role_id, config.apworld_channel_id),
+            (
+                config.guild_id,
+                config.forum_id,
+                config.recap_channel_id,
+                config.ping_role_id,
+                config.apworld_channel_id,
+                config.admin_only_games,
+            ),
         )
         await self.db.conn.commit()

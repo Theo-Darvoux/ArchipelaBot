@@ -71,6 +71,25 @@ class ConfigCog(
         )
         await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
 
+    @app_commands.command(name="creation", description="Choisir qui peut créer des parties")
+    @app_commands.describe(qui="Qui peut lancer /partie nouvelle et /track start hors d'un post d'inscriptions")
+    @app_commands.choices(
+        qui=[
+            app_commands.Choice(name="Tous les membres", value="all"),
+            app_commands.Choice(name="Admins uniquement", value="admins"),
+        ]
+    )
+    async def set_creation(self, interaction: Interaction, qui: app_commands.Choice[str]) -> None:
+        config = await self.bot.guild_configs.get(interaction.guild_id)
+        config.admin_only_games = qui.value == "admins"
+        await self.bot.guild_configs.save(config)
+        text = (
+            "Seuls les admins (permission *Gérer le serveur*) peuvent créer des parties."
+            if config.admin_only_games
+            else "Tous les membres peuvent créer des parties."
+        )
+        await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
+
     @app_commands.command(name="apworlds", description="Choisir le salon où vous postez vos apworlds")
     @app_commands.describe(salon="Laisser vide pour ne plus suivre de salon : les apworlds déjà repris restent")
     async def set_apworlds(self, interaction: Interaction, salon: discord.TextChannel | None = None) -> None:
@@ -108,9 +127,11 @@ class ConfigCog(
         recap = f"<#{config.recap_channel_id}>" if config.recap_channel_id else "*post de la room uniquement*"
         role = f"<@&{config.ping_role_id}>" if config.ping_role_id else "*personne*"
         apworlds = f"<#{config.apworld_channel_id}>" if config.apworld_channel_id else "*aucun*"
+        creation = "admins uniquement" if config.admin_only_games else "tous les membres"
         text = (
             f"### {E.settings} Configuration\n**Forum des rooms** : {forum}\n**Récaps** : {recap}\n"
-            f"**Pingé pour les nouvelles parties** : {role}\n**Salon des apworlds** : {apworlds}"
+            f"**Pingé pour les nouvelles parties** : {role}\n**Salon des apworlds** : {apworlds}\n"
+            f"**Création des parties** : {creation}"
         )
         await interaction.response.send_message(view=notice(text), ephemeral=True)
 

@@ -48,8 +48,13 @@ def test_game_from_a_constant_elsewhere():
         "cuphead/items.py": "class X(Item):\n    game = GAME_NAME\n",
     }
     assert read_apworld(apworld("cuphead", game=None, init=init, **files), 7).game == "Cuphead"
+    stale = (
+        "class W(World):\n    game = 'A (Open World)'\nclass I(Item):\n    game = 'A'\n"
+        "class Web(WebWorld):\n    game = 'B'\n"
+    )
+    assert read_apworld(apworld(game=None, init=stale), 7).game == "A (Open World)"
     with pytest.raises(ApworldError, match="quel jeu"):
-        read_apworld(apworld(game=None, init="class W(World):\n    game = 'A'\nclass I(Item):\n    game = 'B'\n"), 7)
+        read_apworld(apworld(game=None, init="class I(Item):\n    game = 'A'\nclass L(Location):\n    game = 'B'\n"), 7)
     assert (
         read_apworld(
             apworld(game=None, init="class W(World):\n    game = 'A'\n", **{"hacknet/x.py": "def f(:\n"}), 7

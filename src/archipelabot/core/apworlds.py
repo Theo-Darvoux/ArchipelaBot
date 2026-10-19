@@ -126,17 +126,26 @@ def _game_in_code(archive: zipfile.ZipFile, module: str) -> str:
         for node in tree.body:
             if (target := _assigned(node)) and isinstance(target[1], ast.Constant) and isinstance(target[1].value, str):
                 constants.setdefault(target[0], set()).add(target[1].value)
-    games = set()
+    world_classes: set[str] = set()
+    other_classes: set[str] = set()
     for tree in trees:
         for cls in ast.walk(tree):
             if not isinstance(cls, ast.ClassDef):
                 continue
+            games = world_classes if _is_world(cls) else other_classes
             for node in cls.body:
                 if (target := _assigned(node)) and target[0] == "game":
                     games |= _strings(target[1], constants)
-    if len(games) != 1:
-        raise ApworldError(f"impossible de savoir de quel jeu il s'agit (pas de `{MANIFEST}`).")
-    return games.pop()
+    # items and locations sometimes keep an older name than the world
+    for games in (world_classes, other_classes):
+        if len(games) == 1:
+            return games.pop()
+    raise ApworldError(f"impossible de savoir de quel jeu il s'agit (pas de `{MANIFEST}`).")
+
+
+def _is_world(cls: ast.ClassDef) -> bool:
+    names = [b.id if isinstance(b, ast.Name) else b.attr if isinstance(b, ast.Attribute) else "" for b in cls.bases]
+    return any(name.endswith("World") and name != "WebWorld" for name in names)
 
 
 def _assigned(node: ast.stmt) -> tuple[str, ast.expr] | None:

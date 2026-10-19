@@ -8,7 +8,7 @@ from ...errors import UserError
 from ..components import Tone, notice
 from ..emojis import E
 from ..forum import TAG_SPECS, ensure_room_tags, missing_permissions
-from ..render.text import md, plural
+from ..render.text import code, plural
 from ..types import Interaction
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class ConfigCog(
             "automatiquement."
         )
         if result.refused:
-            text += "\n⚠️ Ignorés :\n" + "\n".join(f"`{md(name)}` : {why}" for name, why in result.refused[:10])
+            text += "\n⚠️ Ignorés :\n" + "\n".join(f"{code(name)} : {why}" for name, why in result.refused[:10])
         tone = Tone.WARNING if result.refused else Tone.SUCCESS
         await interaction.followup.send(view=notice(text, tone), ephemeral=True)
 

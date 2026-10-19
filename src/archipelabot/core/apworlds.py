@@ -1,7 +1,7 @@
+import ast
 import hashlib
 import io
 import json
-import re
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -12,8 +12,7 @@ EXTENSION = ".apworld"
 MAX_SIZE = 9 * 1024 * 1024  # the zip handed to the host must fit under Discord's 10 MB
 MANIFEST = "archipelago.json"
 MAX_TEXT = 1024 * 1024
-# `game = "Name"` on the World class, for apworlds made before manifests existed.
-GAME_ATTRIBUTE = re.compile(r"^[ \t]+game(?:[ \t]*:[ \t]*[\w\[\]]+)?[ \t]*=[ \t]*([\"'])(.+?)\1", re.MULTILINE)
+MANUAL = "data/game.json"
 BROKEN_ZIP = (zipfile.BadZipFile, zlib.error, EOFError, OSError, NotImplementedError)
 
 
@@ -58,7 +57,7 @@ def read_apworld(content: bytes, uploaded_by: int) -> Apworld:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             module = _module(archive)
             game, version = _manifest(archive, module)
-            game = game or _game_in_code(archive, module)
+            game = game or _manual_game(archive, module) or _game_in_code(archive, module)
     except BROKEN_ZIP as e:
         raise ApworldError("ce n'est pas un apworld valide (zip illisible).") from e
     return Apworld(game, module, version, hashlib.sha256(content).hexdigest(), uploaded_by)
@@ -99,8 +98,59 @@ def _manifest(archive: zipfile.ZipFile, module: str) -> tuple[str, str]:
     return (game.strip() if isinstance(game, str) else ""), (str(version).strip() if version else "")
 
 
+def _manual_game(archive: zipfile.ZipFile, module: str) -> str:
+    """Manual worlds are named after their data/game.json."""
+    text = _text(archive, f"{module}/{MANUAL}")
+    if text is None:
+        return ""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return ""
+    if not isinstance(data, dict) or not data.get("game") or not (creator := data.get("creator") or data.get("player")):
+        return ""
+    return f"Manual_{data['game']}_{creator}"
+
+
 def _game_in_code(archive: zipfile.ZipFile, module: str) -> str:
-    games = {match[2] for match in GAME_ATTRIBUTE.finditer(_text(archive, f"{module}/__init__.py") or "")}
+    """The `game` of the World class, for apworlds made before manifests existed: read, never run."""
+    trees = []
+    for name in archive.namelist():
+        if name.startswith(f"{module}/") and name.endswith(".py") and (text := _text(archive, name)) is not None:
+            try:
+                trees.append(ast.parse(text))
+            except (SyntaxError, ValueError):
+                continue
+    constants: dict[str, set[str]] = {}
+    for tree in trees:
+        for node in tree.body:
+            if (target := _assigned(node)) and isinstance(target[1], ast.Constant) and isinstance(target[1].value, str):
+                constants.setdefault(target[0], set()).add(target[1].value)
+    games = set()
+    for tree in trees:
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for node in cls.body:
+                if (target := _assigned(node)) and target[0] == "game":
+                    games |= _strings(target[1], constants)
     if len(games) != 1:
         raise ApworldError(f"impossible de savoir de quel jeu il s'agit (pas de `{MANIFEST}`).")
     return games.pop()
+
+
+def _assigned(node: ast.stmt) -> tuple[str, ast.expr] | None:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.targets[0].id, node.value
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+        return node.target.id, node.value
+    return None
+
+
+def _strings(value: ast.expr, constants: dict[str, set[str]]) -> set[str]:
+    match value:
+        case ast.Constant(value=str(text)):
+            return {text}
+        case ast.Name(id=name) | ast.Attribute(attr=name):
+            return constants.get(name, set())
+    return set()

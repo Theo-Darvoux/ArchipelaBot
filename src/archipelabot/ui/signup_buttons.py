@@ -22,7 +22,7 @@ from .render.signup import (
     upload_text,
     upload_tone,
 )
-from .render.text import md, plural
+from .render.text import code, md, plural
 
 if TYPE_CHECKING:
     from .games import GameManager
@@ -191,7 +191,7 @@ class MyYamlsView(ui.LayoutView):
                 slots = "\n".join(f"{player_label(p)} · {game_label(p)}" for p in f.players)
             remove = ui.Button(label="Retirer", style=discord.ButtonStyle.danger)
             remove.callback = self._remove(f)
-            container.add_item(ui.Section(ui.TextDisplay(f"`{md(f.filename)}`\n{slots}"), accessory=remove))
+            container.add_item(ui.Section(ui.TextDisplay(f"{code(f.filename)}\n{slots}"), accessory=remove))
         for a in attached:
             if a.user_id != self.user_id:
                 continue
@@ -336,7 +336,7 @@ class YamlsZipButton(ui.DynamicItem[ui.Button], template=r"archipelabot:yamlzip:
             + ". Pense à vider `Players` des yamls d'anciennes parties."
         )
         if invalid := [f for f in await games.files(game) if f.invalid]:
-            text += "\n⚠️ Yaml invalide : " + ", ".join(f"`{md(f.filename)}` (<@{f.user_id}>)" for f in invalid)
+            text += "\n⚠️ Yaml invalide : " + ", ".join(f"{code(f.filename)} (<@{f.user_id}>)" for f in invalid)
         if missing:
             text += "\n⚠️ Apworld manquant : " + ", ".join(f"*{md(name)}*" for name in missing)
         tone = Tone.WARNING if missing or invalid else Tone.INFO

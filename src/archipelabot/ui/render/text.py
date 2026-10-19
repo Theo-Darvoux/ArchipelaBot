@@ -10,6 +10,11 @@ def md(text: str) -> str:
     return escape_markdown(text)
 
 
+def code(text: str) -> str:
+    """Inline code: markdown is not parsed there, so nothing to escape but the backticks."""
+    return f"`{text.replace('`', "'")}`"
+
+
 def plural(count: int, singular: str, plural_form: str | None = None) -> str:
     return f"{count} {singular if count == 1 else plural_form or singular + 's'}"
 

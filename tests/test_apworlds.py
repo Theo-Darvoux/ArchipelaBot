@@ -39,6 +39,36 @@ def test_old_apworlds_without_manifest():
         read_apworld(apworld(game=None, init="game = GAME_NAME\n"), 7)
 
 
+def test_game_from_a_constant_elsewhere():
+    init = (
+        "from .names import GAME_NAME\nfrom . import names\n\nclass CupheadWorld(World):\n    game = names.GAME_NAME\n"
+    )
+    files = {
+        "cuphead/names.py": 'GAME_NAME: str = "Cuphead"\n',
+        "cuphead/items.py": "class X(Item):\n    game = GAME_NAME\n",
+    }
+    assert read_apworld(apworld("cuphead", game=None, init=init, **files), 7).game == "Cuphead"
+    with pytest.raises(ApworldError, match="quel jeu"):
+        read_apworld(apworld(game=None, init="class W(World):\n    game = 'A'\nclass I(Item):\n    game = 'B'\n"), 7)
+    assert (
+        read_apworld(
+            apworld(game=None, init="class W(World):\n    game = 'A'\n", **{"hacknet/x.py": "def f(:\n"}), 7
+        ).game
+        == "A"
+    )
+
+
+def test_manual_worlds_are_named_after_their_game_json():
+    init = "class ManualWorld(World):\n    game: str = game_name\n"
+    data = {"game": "PokemonTCG", "creator": "sha", "filler_item_name": "x"}
+    world = read_apworld(apworld("manual_pokemontcg_sha", game=None, init=init,
+                                 **{"manual_pokemontcg_sha/data/game.json": json.dumps(data)}), 7)  # fmt: skip
+    assert world.game == "Manual_PokemonTCG_sha"
+    old = {"game": "Entei", "player": "worldoflight"}
+    files = {"manual_worldoflight_entei/data/game.json": json.dumps(old)}
+    assert read_apworld(apworld("manual_worldoflight_entei", game=None, **files), 7).game == "Manual_Entei_worldoflight"
+
+
 @pytest.mark.parametrize(
     ("content", "error"),
     [

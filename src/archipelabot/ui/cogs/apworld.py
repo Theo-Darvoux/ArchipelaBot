@@ -10,7 +10,7 @@ from ...errors import UserError
 from ..components import Tone, notice
 from ..emojis import E
 from ..render.signup import apworld_label
-from ..render.text import md
+from ..render.text import code
 from ..types import Interaction
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ class ApworldCog(commands.GroupCog, name="apworld", group_name="apworld", group_
         result = await self.bot.games.import_apworlds(message.guild.id, [message])
         try:
             if result.refused:
-                text = "⚠️ Apworld ignoré :\n" + "\n".join(f"`{md(name)}` : {why}" for name, why in result.refused)
+                text = "⚠️ Apworld ignoré :\n" + "\n".join(f"{code(name)} : {why}" for name, why in result.refused)
                 await message.reply(view=notice(text, Tone.WARNING), mention_author=False)
             else:
                 await message.add_reaction("✅")

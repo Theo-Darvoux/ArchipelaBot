@@ -9,7 +9,7 @@ from ...core.yamls import PlayerYaml, YamlFile
 from ...storage.games import GameRecord
 from ..components import Tone
 from ..emojis import E
-from .text import fit_lines, md, plural
+from .text import code, fit_lines, md, plural
 
 ROSTER_BUDGET = 3000
 INVALID_KEPT = "Il est gardé quand même, mais la génération échouera tant qu'il n'est pas corrigé."
@@ -27,7 +27,7 @@ def game_label(player: PlayerYaml) -> str:
 
 def apworld_label(apworld: Apworld) -> str:
     version = f" v{md(apworld.version)}" if apworld.version else ""
-    return f"`{md(apworld.module)}`{version} · *{md(apworld.game)}*"
+    return f"{code(apworld.module)}{version} · *{md(apworld.game)}*"
 
 
 def missing_text(game: str, in_library: bool) -> str:
@@ -48,7 +48,7 @@ def signup_roster(files: Sequence[YamlFile]) -> str:
         line
         for f in files
         for line in (
-            [f"⚠️ `{md(f.filename)}` · *yaml invalide* · <@{f.user_id}>"]
+            [f"⚠️ {code(f.filename)} · *yaml invalide* · <@{f.user_id}>"]
             if f.invalid
             else [f"{E.yaml} {player_label(p)} · {game_label(p)} · <@{f.user_id}>" for p in f.players]
         )
@@ -128,7 +128,7 @@ def upload_text(upload: Upload) -> str:
     if upload.apworld:
         text = f"{E.apworld} **{md(upload.filename)}** : apworld {apworld_label(upload.apworld)}"
         if upload.replaced:
-            text += "\n-# Remplace " + ", ".join(f"`{md(label)}`" for label in upload.replaced)
+            text += "\n-# Remplace " + ", ".join(f"{code(label)}" for label in upload.replaced)
         return text
     if upload.invalid:
         text = f"{E.yaml} **{md(upload.filename)}** : ⚠️ {upload.invalid}\n-# {INVALID_KEPT}"
@@ -136,7 +136,7 @@ def upload_text(upload: Upload) -> str:
         slots = ", ".join(f"{player_label(p)} · {game_label(p)}" for p in upload.players)
         text = f"{E.yaml} **{md(upload.filename)}** : {slots}"
     if upload.replaced:
-        text += "\n-# Remplace " + ", ".join(f"`{md(name)}`" for name in upload.replaced)
+        text += "\n-# Remplace " + ", ".join(f"{code(name)}" for name in upload.replaced)
     return text + "".join(f"\n-# ⚠️ {warning}" for warning in upload.warnings)
 
 

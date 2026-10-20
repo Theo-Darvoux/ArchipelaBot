@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from archipelabot.ap.protocol import ClientStatus, ItemFlags
 from archipelabot.core import events as ev
 from archipelabot.core.events import ConnectionState
+from archipelabot.core.logic import SlotLogic
 from archipelabot.core.progress import Baseline, Progress
 from archipelabot.core.room import RoomState, SlotInfo
 from archipelabot.ui.render.panel import ROSTER_BUDGET, panel_view, roster
@@ -71,3 +72,31 @@ def test_player_status_view():
     text = view_text(player_status_view(2, state, progress, {2: 222}))
     assert text.startswith("## Bob\n*Super Metroid* · joué par <@222>\n# 25 %\n-# 2 / 8 checks · ⚫ · 💀 1 mort")
     assert text.endswith("🟣 **Wave Beam** de Carol\n🟣 **Ice Beam** de Alice")
+
+
+def test_player_status_lists_the_checks_in_logic():
+    state, progress = make_room()
+    progress.apply_baseline(Baseline({2: {1, 2}}, {2: 80}))
+    names = {10: "Brinstar Missile", 11: "alpha Tank", 12: "Crateria_Bomb"}
+    logic = {2: SlotLogic(frozenset(names), False)}
+    text = view_text(player_status_view(2, state, progress, {}, logic, lambda slot, loc: names[loc]))
+    assert "**Checks en logique**\n- alpha Tank\n- Brinstar Missile\n- Crateria\\_Bomb" in text
+    assert "Checks en logique" not in view_text(player_status_view(2, state, progress, {}, logic))
+
+    many = {i: f"Location {i:03d} " + "x" * 40 for i in range(100)}
+    logic = {2: SlotLogic(frozenset(many), False)}
+    text = view_text(player_status_view(2, state, progress, {}, logic, lambda slot, loc: many[loc]))
+    listed = text.split("**Checks en logique**\n")[1].splitlines()
+    assert listed[0].startswith("- Location 000") and listed[-1] == f"-# … et {100 - len(listed) + 1} autres"
+    assert len("\n".join(listed)) < 1600 and len(listed) <= 41
+
+
+def test_player_status_shows_what_the_logic_counts():
+    state, progress = make_room()
+    inventory = [("Hammers", "Block 1 (Alice)"), ("Firebrand", ""), ("Hammers", "Pipe_Room (Carol)")]
+    text = view_text(player_status_view(2, state, progress, {}, inventory=inventory))
+    assert text.endswith(
+        "**Items de progression comptés par la logique**\n- **Firebrand** : au départ\n"
+        "- **Hammers** ×2 : Block 1 (Alice), Pipe\\_Room (Carol)"
+    )
+    assert "comptés" not in view_text(player_status_view(2, state, progress, {}, inventory=[]))

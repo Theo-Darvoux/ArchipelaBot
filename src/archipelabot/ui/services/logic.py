@@ -74,6 +74,13 @@ class LogicService:
         self._signature = signature
         self.on_change()
 
+    async def inventory(self, slot: int) -> list[tuple[str, str]] | None:
+        """Progression items the logic counts for a slot, with where they come from; None without logic."""
+        if self._worker is None or not self.progress.synced:
+            return None
+        players = [s.slot for s in self.state.players]
+        return await self._worker.inventory({s: self.progress[s].checked for s in players}, slot)
+
     async def close(self) -> None:
         worker, self._worker = self._worker, None
         self.results = {}

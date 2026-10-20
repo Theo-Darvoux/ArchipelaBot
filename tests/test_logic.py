@@ -248,6 +248,15 @@ async def test_the_room_items_replace_a_fill_that_cannot_be_reproduced():
         assert {slot: await worker.placements(slot) for slot in (1, 2, 3)} == room
         assert len(await worker.evaluate({1: [], 2: [], 3: []})) == 3
 
+        checked = {slot: list(items) for slot, items in room.items()}
+        counted = await worker.inventory(checked, 1)
+        alice = [(loc, slot) for slot, items in room.items() for loc, (_, receiver) in items.items() if receiver == 1]
+        start = await worker.inventory({1: [], 2: [], 3: []}, 1)
+        assert ("Ground Dash", "") in start and all(source == "" for _, source in start)  # Celeste 64's moves
+        found = counted[len(start) :]
+        assert found and all(source.endswith(("(Alice)", "(Bob)", "(Carol)")) for _, source in found)
+        assert len(found) <= len(alice)  # progression only
+
         room[2][999999999] = room[2].pop(next(iter(room[2])))
         assert await worker.place(room) == 2  # one only in the room, one only in the regeneration
     finally:
@@ -308,6 +317,12 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     assert "en logique" in view_text(runtime.render_panel())
 
     status = bot.get_cog("status")
+    asker = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=FakeUser(id=5))
+    await status.status.callback(status, asker, joueur="Alice")
+    names = sorted(runtime.tracker.location_name(1, loc) for loc in runtime.logic.results[1].locations)
+    assert names and not any(name.startswith("Lieu #") for name in names)
+    assert f"**Checks en logique**\n- {names[0]}\n" in view_text(asker.response.sent[0]["view"])
+
     runtime.logic.results = {
         1: SlotLogic(frozenset({1}), False, (3,)),
         2: SlotLogic(frozenset({2}), False, (3, 3)),

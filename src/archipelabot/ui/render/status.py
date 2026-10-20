@@ -1,6 +1,6 @@
 """/status: one player's card."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import discord
 from discord import ui
@@ -23,6 +23,7 @@ def player_status_view(
     claims: dict[int, int],
     logic: dict[int, SlotLogic] | None = None,
     location_name: Callable[[int, int], str] | None = None,
+    inventory: Sequence[tuple[str, str]] | None = None,
 ) -> ui.LayoutView:
     p = progress[slot]
     subtitle = f"*{md(state.game(slot))}*" + (f" · joué par <@{claims[slot]}>" if slot in claims else "")
@@ -44,6 +45,11 @@ def player_status_view(
     result = (logic or {}).get(slot)
     if result and result.locations and location_name and not progress.reached_goal(slot):
         items += [ui.Separator(), ui.TextDisplay(f"**Checks en logique**\n{_in_logic(slot, result, location_name)}")]
+    if inventory:
+        items += [
+            ui.Separator(),
+            ui.TextDisplay(f"**Items de progression comptés par la logique**\n{_counted(inventory)}"),
+        ]
 
     if p.received:
         received = "\n".join(
@@ -66,3 +72,19 @@ def _in_logic(slot: int, result: SlotLogic, location_name: Callable[[int, int], 
     if rest := len(names) - len(shown):
         shown.append(f"-# … et {plural(rest, 'autre')}")
     return "\n".join(shown)
+
+
+def _counted(inventory: Sequence[tuple[str, str]]) -> str:
+    sources: dict[str, list[str]] = {}
+    for item, source in inventory:
+        sources.setdefault(item, []).append(source or "au départ")
+    lines = []
+    for item in sorted(sources, key=str.casefold):
+        found = sources[item]
+        count = f" ×{len(found)}" if len(found) > 1 else ""
+        line = f"- **{md(item)}**{count} : {md(', '.join(found))}"
+        if sum(len(line) + 1 for line in lines) + len(line) > IN_LOGIC_BUDGET:
+            lines.append(f"-# … et {plural(len(sources) - len(lines), 'autre')}")
+            break
+        lines.append(line)
+    return "\n".join(lines)

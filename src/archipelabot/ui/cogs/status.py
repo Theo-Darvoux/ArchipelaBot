@@ -1,10 +1,11 @@
+import asyncio
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ...core.logic import blame
+from ...core.logic import LogicError, blame
 from ...errors import UserError
 from ..autocomplete import slot_autocomplete
 from ..components import Tone, notice
@@ -18,6 +19,8 @@ from ..types import Interaction
 
 if TYPE_CHECKING:
     from ...bot import ArchipelaBot
+
+INVENTORY_WAIT = 2.0  # Discord wants an answer within 3 s
 
 
 class StatusCog(commands.Cog, name="status"):
@@ -42,13 +45,17 @@ class StatusCog(commands.Cog, name="status"):
             await interaction.response.send_message(view=runtime.render_panel(buttons=False), ephemeral=True)
             return
 
-        def status(slot: int) -> discord.ui.LayoutView:
+        async def status(slot: int) -> discord.ui.LayoutView:
+            try:
+                inventory = await asyncio.wait_for(runtime.logic.inventory(slot), INVENTORY_WAIT)
+            except (LogicError, TimeoutError):
+                inventory = None
             logic, names = runtime.logic.results, runtime.tracker.location_name
-            return player_status_view(slot, state, progress, runtime.claims, logic, names)
+            return player_status_view(slot, state, progress, runtime.claims, logic, names, inventory)
 
-        await interaction.response.send_message(view=status(slots[0]), ephemeral=True)
+        await interaction.response.send_message(view=await status(slots[0]), ephemeral=True)
         for slot in slots[1:]:
-            await interaction.followup.send(view=status(slot), ephemeral=True)
+            await interaction.followup.send(view=await status(slot), ephemeral=True)
 
     @app_commands.command(name="hints", description="Les hints de cette room (visibles seulement par toi)")
     @app_commands.describe(joueur="Par défaut : tes hints, ou tous les hints si tu n'as pas de slot")

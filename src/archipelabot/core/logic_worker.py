@@ -40,6 +40,8 @@ def main() -> None:
                     answer({"spoiler": spoiler(multiworld)})
                 case "place":
                     answer({"unmatched": place(multiworld, request["placements"])})
+                case "inventory":
+                    answer({"items": inventory(multiworld, request["checked"], request["slot"])})
                 case other:
                     answer({"error": f"unknown command {other}"})
         except Exception as e:
@@ -129,6 +131,19 @@ def evaluate(multiworld, checked: dict[str, list[int]]) -> dict[int, dict]:
             ],
         }
     return result
+
+
+def inventory(multiworld, checked: dict[str, list[int]], player: int) -> list[list[str]]:
+    """The progression items the logic counts for a player, with where each one comes from ("" for the start)."""
+    done = {int(slot): set(ids) for slot, ids in checked.items()}
+    items = [[item.name, ""] for item in multiworld.precollected_items[player] if item.advancement]
+    for location in multiworld.get_locations():
+        if location.address is None or not location.item or not location.item.advancement:
+            continue
+        if location.address in done.get(location.player, ()):
+            source = f"{location.name} ({multiworld.player_name[location.player]})"
+            items += [[item.name, source] for item in received(multiworld, location.item) if item.player == player]
+    return items
 
 
 def received(multiworld, item):

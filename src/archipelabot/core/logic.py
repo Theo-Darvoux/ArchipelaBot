@@ -300,6 +300,11 @@ class LogicWorker:
             for slot, info in answer["slots"].items()
         }
 
+    async def inventory(self, checked: dict[int, Iterable[int]], slot: int) -> list[tuple[str, str]]:
+        """Progression items the logic counts for a slot: (item, location that gave it, "" for the start)."""
+        request = {"cmd": "inventory", "checked": {s: list(ids) for s, ids in checked.items()}, "slot": slot}
+        return [(item, source) for item, source in (await self._request(request))["items"]]
+
     async def place(self, placements: dict[int, dict[int, tuple[int, int]]]) -> int:
         """Use the room's items instead of the regenerated ones; returns how many locations did not match."""
         request = {slot: {loc: list(item) for loc, item in items.items()} for slot, items in placements.items()}

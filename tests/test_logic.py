@@ -139,6 +139,31 @@ async def test_generation_errors_are_reported():
         await start_dev_worker([("Players/p1.yaml", b"name: Alice\ngame: Not A Game\n")])
 
 
+def custom_checksfinder() -> bytes:
+    """ChecksFinder renamed into a world Archipelago does not ship."""
+    source = AP_DIR / "worlds" / "checksfinder"
+    entries = {
+        f"custom_checksfinder/{path.relative_to(source).as_posix()}": path.read_bytes().replace(
+            b'"ChecksFinder"', b'"Custom ChecksFinder"'
+        )
+        for path in source.rglob("*.py")
+    }
+    entries["custom_checksfinder/archipelago.json"] = b'{"game": "Custom ChecksFinder", "world_version": "1.0.0"}'
+    return zipped(entries)
+
+
+@requires_ap_server
+async def test_apworlds_are_loaded():
+    worker, generated = await start_dev_worker(
+        [
+            ("Players/dave.yaml", b"name: Dave\ngame: Custom ChecksFinder\nCustom ChecksFinder: {}\n"),
+            ("custom_worlds/custom_checksfinder.apworld", custom_checksfinder()),
+        ]
+    )
+    await worker.close()
+    assert generated.slots == {1: ("Dave", "Custom ChecksFinder")}
+
+
 @requires_ap_server
 async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     record, thread = game

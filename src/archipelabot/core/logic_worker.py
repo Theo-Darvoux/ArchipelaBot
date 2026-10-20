@@ -51,6 +51,8 @@ def generate(job: dict):
 
     # custom_worlds/ and host.yaml of this room only
     Utils.user_path.cached_path = job["workdir"]  # type: ignore[attr-defined]
+    # a user folder that is not Archipelago's own keeps its apworlds in worlds/
+    os.rename("custom_worlds", "worlds")
     import Generate
     import Main
 

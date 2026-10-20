@@ -5,7 +5,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_NO_CACH
 
 # Archipelago, to regenerate seeds for /track logique: same version as the one players generate with.
 ARG ARCHIPELAGO_VERSION=0.6.8
-RUN apt-get update && apt-get install -y --no-install-recommends git build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential fonts-inter fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 --branch "$ARCHIPELAGO_VERSION" https://github.com/ArchipelagoMW/Archipelago.git /opt/Archipelago \
     && cd /opt/Archipelago && uv venv -q .venv \

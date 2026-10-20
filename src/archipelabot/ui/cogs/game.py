@@ -141,13 +141,25 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
             return
+        if not (files := [a for a in message.attachments if is_signup_file(a.filename)]):
+            return
         game = self.bot.games.by_thread(message.channel.id)
-        if game is not None and (files := [a for a in message.attachments if is_signup_file(a.filename)]):
-            await self._files(game, message, files)
+        admin = game is None and self._manages_room(message)
+        if admin:
+            game = await self.bot.games.repo.started_in(message.channel.id)
+        if game is not None:
+            await self._files(game, message, files, admin=admin)
 
-    async def _files(self, game: GameRecord, message: discord.Message, attachments: list[discord.Attachment]) -> None:
+    def _manages_room(self, message: discord.Message) -> bool:
+        runtime = self.bot.rooms.by_thread(message.channel.id)
+        permissions = message.channel.permissions_for(message.author)  # type: ignore[arg-type, union-attr]
+        return runtime is not None and runtime.can_manage(message.author.id, permissions)
+
+    async def _files(
+        self, game: GameRecord, message: discord.Message, attachments: list[discord.Attachment], *, admin: bool
+    ) -> None:
         games = self.bot.games
-        uploads = await games.upload(game, message.author.id, attachments)
+        uploads = await games.upload(game, message.author.id, attachments, admin=admin)
         report = await UploadReport.create(games, game, message.author.id, uploads)
         try:
             if all(u.clean for u in uploads) and not report.needs_answer:

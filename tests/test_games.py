@@ -10,6 +10,7 @@ import pytest
 from archipelabot.core import events as ev
 from archipelabot.errors import UserError
 from archipelabot.storage.guilds import GuildConfig
+from archipelabot.ui.apworlds import GameYamlsView
 from archipelabot.ui.games import ZIP_OVERHEAD, GameManager
 from archipelabot.ui.signup_buttons import MyYamlsView, UploadReport, YamlButton, YamlModal, YamlsZipButton
 
@@ -485,6 +486,50 @@ async def test_apworlds_sent_outside_a_game(bot, game):
     await bot.games.upload(record, 1, [FakeAttachment("a.yaml", yaml("A", "Hacknet"))])
     report = await UploadReport.create(bot.games, record, 1, [])
     assert "Utiliser hacknet v0.3.1" in parts_of(report)
+
+
+@requires_ap_server
+async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
+    record, thread = game
+    dev = {name: (DEV_DIR / "players" / name).read_bytes() for name in ("p1.yaml", "p2.yaml", "p3.yaml")}
+    await bot.games.upload(record, 1, [FakeAttachment("p1.yaml", dev["p1.yaml"])])
+    await bot.games.upload(record, 2, [FakeAttachment("p2.yaml", dev["p2.yaml"])])
+    await bot.games.upload(record, 3, [FakeAttachment("old.yaml", yaml("Carole", "ChecksFinder"))])
+    await bot.games.upload(record, 3, [FakeAttachment("extra.yaml", yaml("Dave", "Hacknet"))])
+    track = bot.get_cog("track")
+    start = {"lien": ap_server.address, "slot": "Carol", "mot_de_passe": None, "nom": None}
+    await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
+    panel = thread.messages[0].view
+
+    cog = bot.get_cog("partie")
+    thread.parent.permissions = discord.Permissions.none()
+    player = FakeUserMessage(thread, attachments=[FakeAttachment("x.yaml", yaml("X"))], author=FakeUser(id=5))
+    await cog.on_message(player)
+    assert not player.reactions and not player.replies
+    with pytest.raises(UserError, match="Seule la personne"):
+        await track.yamls.callback(track, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)))
+
+    # the host, who started the tracking, adds the yaml that really generated Carol...
+    fixed = FakeUserMessage(thread, attachments=[FakeAttachment("carol.yaml", dev["p3.yaml"])])
+    await cog.on_message(fixed)
+    assert fixed.reactions == ["✅"]
+    # ...and replaces Alice's: it stays hers
+    await bot.games.upload(record, 77, [FakeAttachment("alice.yaml", dev["p1.yaml"])], admin=True)
+    owners = {f.filename: f.user_id for f in await bot.games.files(record)}
+    assert owners == {"p2.yaml": 2, "old.yaml": 3, "extra.yaml": 3, "carol.yaml": 77, "alice.yaml": 1}
+
+    interaction = click(bot, channel_id=thread.id)
+    await track.yamls.callback(track, interaction)
+    view = interaction.response.sent[0]["view"]
+    assert "`carol.yaml` · <@77>\n**Carol** · *ChecksFinder*" in view_text(view)
+    files = {f.filename: f for f in await bot.games.files(record)}
+    select = parts_of(view)["Retirer des yamls"]
+    select._values = [str(files["old.yaml"].id), str(files["extra.yaml"].id)]
+    pick = click(bot)
+    await select.callback(pick)
+    assert "extra.yaml" not in view_text(pick.response.sent[0]["view"])
+    assert sorted(f.filename for f in await bot.games.files(record)) == ["alice.yaml", "carol.yaml", "p2.yaml"]
+    assert thread.messages[0].view is panel  # the post still shows the room
 
 
 @requires_ap_server

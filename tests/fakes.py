@@ -65,6 +65,9 @@ class FakeThread:
     def mention(self) -> str:
         return f"<#{self.id}>"
 
+    def permissions_for(self, member) -> discord.Permissions:
+        return self.parent.permissions_for(member)
+
     async def send(self, content: str | None = None, *, view=None, allowed_mentions=None, **_kwargs) -> FakeMessage:
         message = FakeMessage(self.id * 1000 + len(self.messages), content, view, allowed_mentions)
         self.messages.append(message)

@@ -56,10 +56,17 @@ def test_the_regenerated_seed_must_be_the_room():
     with pytest.raises(LogicError, match="la seed ne correspond pas"):
         check_room(Generated("124", "0.6.8", "f", {1: ("Alice", "A"), 2: ("Bob", "B")}), state)
     with pytest.raises(LogicError, match="mêmes joueurs") as error:
-        check_room(Generated("123", "0.6.8", "f", {1: ("Alice", "A"), 2: ("Bob", "C"), 3: ("Eve", "E")}), state)
+        check_room(Generated("123", "0.6.8", "f", {1: ("Bob", "C"), 2: ("Alice", "A"), 3: ("Eve", "E")}), state)
     assert str(error.value).endswith(
-        "\n- slot 2 : `Bob` (*B*) dans la room, `Bob` (*C*) regénéré"
-        "\n- slot 3 : *personne* dans la room, `Eve` (*E*) regénéré"
+        "\n- `Bob` (*B*) : dans la room, pas dans les yamls"
+        "\n- `Bob` (*C*) : dans les yamls, pas dans la room"
+        "\n- `Eve` (*E*) : dans les yamls, pas dans la room"
+    )
+    with pytest.raises(LogicError, match="mêmes joueurs") as error:
+        check_room(Generated("123", "0.6.8", "f", {1: ("Bob", "B"), 2: ("Alice", "A")}), state)
+    assert str(error.value).endswith(
+        "\n- slot 1 : `Alice` (*A*) dans la room, `Bob` (*B*) regénéré"
+        "\n- slot 2 : `Bob` (*B*) dans la room, `Alice` (*A*) regénéré"
     )
 
 

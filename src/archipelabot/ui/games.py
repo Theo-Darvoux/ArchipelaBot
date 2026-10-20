@@ -161,6 +161,8 @@ class GameManager:
         )
 
     async def refresh(self, game: GameRecord) -> None:
+        if self.get(game.id or 0) is None:
+            return  # started: the post shows the room now
         try:
             await ThreadSink(self.bot, game).edit_panel(await self.render(game))
         except discord.NotFound:
@@ -214,11 +216,14 @@ class GameManager:
                 log.warning("Could not rename the post of game %s", game.id, exc_info=True)
         await self.refresh(game)
 
-    async def upload(self, game: GameRecord, user_id: int, attachments: Sequence[discord.Attachment]) -> list[Upload]:
+    async def upload(
+        self, game: GameRecord, user_id: int, attachments: Sequence[discord.Attachment], *, admin: bool = False
+    ) -> list[Upload]:
+        """`admin`: even after the start, replacing anyone's yaml for them."""
         uploads = []
         for attachment in attachments:
             if is_apworld_filename(attachment.filename):
-                uploads.append(await self._upload_apworld(game, user_id, attachment))
+                uploads.append(await self._upload_apworld(game, user_id, attachment, admin=admin))
                 continue
             upload = Upload(attachment.filename)
             try:
@@ -229,9 +234,11 @@ class GameManager:
                 content = await attachment.read()
                 new = read_yaml(user_id, PurePath(attachment.filename).name, content)
                 async with self._lock:
-                    if self.get(game.id or 0) is None:
+                    if self.get(game.id or 0) is None and not admin:
                         raise YamlError("les inscriptions de cette partie sont fermées.")
-                    replaced = replaced_by(await self.files(game), new)
+                    replaced = replaced_by(await self.files(game), new, anyone=admin)
+                    if len(owners := {old.user_id for old in replaced}) == 1:
+                        new.user_id = owners.pop()
                     await self.repo.replace_yamls(game.id or 0, new, replaced)
             except YamlError as e:
                 upload.error = str(e)
@@ -247,12 +254,14 @@ class GameManager:
             await self.refresh(game)
         return uploads
 
-    async def _upload_apworld(self, game: GameRecord, user_id: int, attachment: discord.Attachment) -> Upload:
+    async def _upload_apworld(
+        self, game: GameRecord, user_id: int, attachment: discord.Attachment, *, admin: bool = False
+    ) -> Upload:
         upload = Upload(attachment.filename)
         try:
             apworld, content = await _read_apworld(attachment, user_id)
             async with self._lock:
-                if self.get(game.id or 0) is None:
+                if self.get(game.id or 0) is None and not admin:
                     raise ApworldError("les inscriptions de cette partie sont fermées.")
                 apworld = await self.apworlds.add(game.guild_id, apworld, content)
                 replaced = await self.apworlds.attach(game.id or 0, apworld, user_id)
@@ -321,10 +330,10 @@ class GameManager:
             await self.apworlds.detach(game.id or 0, apworld_id)
         await self.refresh(game)
 
-    async def remove(self, game: GameRecord, user_id: int, yaml_id: int) -> None:
+    async def remove(self, game: GameRecord, user_id: int, yaml_id: int, *, admin: bool = False) -> None:
         async with self._lock:
             files = await self.files(game)
-            if not any(f.id == yaml_id and f.user_id == user_id for f in files):
+            if not any(f.id == yaml_id and (admin or f.user_id == user_id) for f in files):
                 raise UserError("Ce yaml n'est plus là.")
             await self.repo.remove_yaml(yaml_id)
         await self.refresh(game)

@@ -124,7 +124,8 @@ def warnings(players: Iterable[PlayerYaml]) -> list[str]:
     ]
 
 
-def replaced_by(files: Iterable[YamlFile], new: YamlFile) -> list[YamlFile]:
+def replaced_by(files: Iterable[YamlFile], new: YamlFile, *, anyone: bool = False) -> list[YamlFile]:
+    """`anyone`: an admin's yaml replaces the ones with the same slots or filename, whoever sent them."""
     keys = [p.key for p in new.players if p.key]
     if duplicate := next((k for i, k in enumerate(keys) if k in keys[:i]), None):
         name = next(p.final_name for p in new.players if p.key == duplicate)
@@ -132,7 +133,7 @@ def replaced_by(files: Iterable[YamlFile], new: YamlFile) -> list[YamlFile]:
     replaced = []
     for old in files:
         overlap = [p.final_name for p in old.players if p.key in keys]
-        if old.user_id != new.user_id:
+        if old.user_id != new.user_id and not anyone:
             if overlap:
                 raise YamlError(f"Le slot **{overlap[0]}** est déjà pris par <@{old.user_id}>.")
         elif overlap or old.filename == new.filename:

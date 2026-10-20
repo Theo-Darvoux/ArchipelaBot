@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from ...core.logic import MAX_SPOILER, LogicError, read_spoiler
 from ...errors import UserError
-from ..apworlds import GameApworldsView
+from ..apworlds import GameApworldsView, GameYamlsView
 from ..components import Tone, notice
 from ..emojis import E
 from ..forum import TAG_SPECS, RoomTag
@@ -173,6 +173,16 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         if game is None:
             raise UserError("Seulement pour une room lancée depuis le post d'une partie (`/partie nouvelle`).")
         view = await GameApworldsView.create(self.bot.games, game)
+        await interaction.response.send_message(view=view, ephemeral=True)
+
+    @app_commands.command(name="yamls", description="Corriger les yamls qui ont servi à générer cette partie")
+    async def yamls(self, interaction: Interaction) -> None:
+        runtime = self._room_here(interaction)
+        self._check_manager(interaction, runtime)
+        game = await self.bot.games.repo.started_in(runtime.record.thread_id or 0)
+        if game is None:
+            raise UserError("Seulement pour une room lancée depuis le post d'une partie (`/partie nouvelle`).")
+        view = await GameYamlsView.create(self.bot.games, game)
         await interaction.response.send_message(view=view, ephemeral=True)
 
     @app_commands.command(name="reglages", description="Choisir ce qui est affiché dans le fil de cette room")

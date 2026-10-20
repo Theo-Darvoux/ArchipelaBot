@@ -7,6 +7,7 @@ import re
 import shutil
 import tempfile
 import zipfile
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -113,11 +114,15 @@ def check_room(generated: Generated, state: RoomState) -> None:
         raise LogicError("Ce spoiler n'est pas celui de cette room (la seed ne correspond pas).")
     players = {s.slot: (s.name, s.game) for s in state.players}
     if players and players != generated.slots:
-        differences = [
-            f"- slot {slot} : {_slot(players.get(slot))} dans la room, {_slot(generated.slots.get(slot))} regénéré"
-            for slot in sorted(players.keys() | generated.slots.keys())
-            if players.get(slot) != generated.slots.get(slot)
-        ]
+        room, regenerated = Counter(players.values()), Counter(generated.slots.values())
+        differences = [f"- {_slot(p)} : dans la room, pas dans les yamls" for p in (room - regenerated).elements()]
+        differences += [f"- {_slot(p)} : dans les yamls, pas dans la room" for p in (regenerated - room).elements()]
+        if not differences:
+            differences = [
+                f"- slot {slot} : {_slot(players[slot])} dans la room, {_slot(generated.slots[slot])} regénéré"
+                for slot in sorted(players)
+                if players[slot] != generated.slots[slot]
+            ]
         more = f"\n- … et {len(differences) - 10} autres" if len(differences) > 10 else ""
         raise LogicError(
             "Les yamls du post ne donnent pas les mêmes joueurs que la room : il faut exactement les yamls (et "
@@ -125,8 +130,8 @@ def check_room(generated: Generated, state: RoomState) -> None:
         )
 
 
-def _slot(player: tuple[str, str] | None) -> str:
-    return f"`{player[0]}` (*{player[1]}*)" if player else "*personne*"
+def _slot(player: tuple[str, str]) -> str:
+    return f"`{player[0]}` (*{player[1]}*)"
 
 
 async def scout_world(address: str, password: str | None, slot_name: str) -> dict[int, tuple[int, int]]:

@@ -141,23 +141,26 @@ class UploadReport(ui.LayoutView):
 
 
 class YamlModal(ui.Modal):
-    def __init__(self, games: "GameManager", game: GameRecord) -> None:
-        super().__init__(title="Envoyer ton yaml", timeout=900)
+    def __init__(self, games: "GameManager", game: GameRecord, *, admin: bool = False) -> None:
+        super().__init__(title="Envoyer des yamls" if admin else "Envoyer ton yaml", timeout=900)
         self.games = games
         self.game = game
+        self.admin = admin
         self.upload = ui.FileUpload(max_values=MAX_FILES)
         self.add_item(
             ui.Label(
-                text="Ton yaml",
-                description="Un yaml par slot, plus l'apworld si ton jeu n'est pas officiel. Un slot déjà envoyé "
-                "est remplacé.",
+                text="Les yamls" if admin else "Ton yaml",
+                description="Un yaml remplace celui du même slot, quelle que soit la personne qui l'a envoyé."
+                if admin
+                else "Un yaml par slot, plus l'apworld si ton jeu n'est pas officiel. Un slot déjà envoyé est "
+                "remplacé.",
                 component=self.upload,
             )
         )
 
     async def on_submit(self, interaction: "Interaction") -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        uploads = await self.games.upload(self.game, interaction.user.id, self.upload.values)
+        uploads = await self.games.upload(self.game, interaction.user.id, self.upload.values, admin=self.admin)
         report = await UploadReport.create(self.games, self.game, interaction.user.id, uploads)
         await interaction.followup.send(view=report, ephemeral=True)
 

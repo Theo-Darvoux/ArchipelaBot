@@ -18,6 +18,7 @@ from ..ap.webhost import RoomNotFound, WebhostError
 from ..core import events as ev
 from ..core.chat import ChatRelay
 from ..core.logic import (
+    SAME_OPTIONS,
     Generated,
     LogicError,
     LogicSetup,
@@ -432,6 +433,8 @@ class RoomManager:
             slot = runtime.tracker.state.slot_by_name(record.slot)
             if slot is None or await worker.placements(slot) != expected:
                 differences = spoiler_differences(spoiler.text, await worker.spoiler()) if spoiler.text else []
+                if differences[:1] == [SAME_OPTIONS]:
+                    differences.append(await self._determinism(runtime, spoiler, generated))
                 raise LogicError(
                     f"La regénération (Archipelago {generated.version}) ne donne pas les mêmes items que la room : "
                     "yamls ou apworlds différents, ou options aléatoires tirées par le site d'Archipelago."
@@ -444,6 +447,20 @@ class RoomManager:
         await self.repo.save_logic(record)
         await runtime.logic.use(worker)
         runtime.panel.request_update(urgent=True)
+
+    async def _determinism(self, runtime: RoomRuntime, spoiler: Spoiler, generated: Generated) -> str:
+        """Same options, other items: an apworld of another version, or a world that never generates the same."""
+        worker, again = await self._regenerate(runtime, spoiler.seed, spoiler.plando, spoiler.version)
+        await worker.close()
+        if again.fingerprint != generated.fingerprint:
+            return (
+                "- Deux regénérations sur le bot ne donnent pas les mêmes items non plus : un des worlds ne se génère "
+                "jamais deux fois pareil, cette seed ne peut pas être reproduite."
+            )
+        return (
+            "- Deux regénérations sur le bot donnent les mêmes items : un apworld n'est sans doute pas dans la version "
+            f"de l'hôte, vérifie avec {self.bot.command_mention('track apworlds')}."
+        )
 
     async def _resume_logic(self, runtime: RoomRuntime) -> None:
         record = runtime.record

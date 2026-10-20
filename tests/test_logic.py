@@ -1,3 +1,4 @@
+import dataclasses
 import io
 import zipfile
 
@@ -108,8 +109,7 @@ def test_spoilers_tell_what_a_regeneration_got_wrong():
 
     swapped = spoiler.replace("First Strawberry (Alice): Map Width (Carol)", "First Strawberry (Alice): Nothing")
     assert spoiler_differences(spoiler, swapped) == [
-        "- Options identiques, mais pas les items : apworld d'une autre version, ou world qui ne se génère pas "
-        "deux fois pareil.",
+        "- Options identiques, mais pas les items.",
         "- Premier écart : `First Strawberry (Alice): Map Width (Carol)` dans le spoiler, "
         "`First Strawberry (Alice): Nothing` regénéré",
     ]
@@ -343,6 +343,52 @@ async def test_wrong_yamls_are_explained(bot, game, ap_server):  # noqa: F811
         await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, spoiler.read(name)))
     assert "\n- `Alice` · Total Strawberries : `20` dans le spoiler, `30` regénéré" in str(error.value)
     assert not runtime.logic.active
+
+
+@requires_ap_server
+async def test_same_options_but_other_items_regenerate_twice(bot, game, ap_server, monkeypatch):  # noqa: F811
+    record, thread = game
+    bot.settings.archipelago_path = AP_DIR
+    for user, name in ((1, "p1.yaml"), (2, "p2.yaml"), (3, "p3.yaml")):
+        await bot.games.upload(record, user, [FakeAttachment(name, (DEV_DIR / "players" / name).read_bytes())])
+    cog = bot.get_cog("track")
+    host = FakeUser(id=77)
+    interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
+    await cog.start.callback(cog, interaction, lien=ap_server.address, slot="Carol", mot_de_passe=None, nom=None)
+    runtime = bot.rooms.by_thread(thread.id)
+    await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
+
+    async def no_placements(_worker, _slot):
+        return {}
+
+    monkeypatch.setattr(LogicWorker, "placements", no_placements)  # like an apworld of another version
+    archive = zipfile.ZipFile(SEEDS[-1])
+    [name] = [n for n in archive.namelist() if n.endswith("_Spoiler.txt")]
+    content = archive.read(name).replace(
+        b"First Strawberry (Alice): Map Width", b"First Strawberry (Alice): Nothing", 1
+    )
+
+    async def logic() -> str:
+        interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
+        with pytest.raises(UserError, match="pas les mêmes items") as error:
+            await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, content))
+        return str(error.value)
+
+    text = await logic()
+    assert "- Options identiques, mais pas les items.\n- Premier écart : `First Strawberry (Alice): Nothing`" in text
+    assert "- Deux regénérations sur le bot donnent les mêmes items" in text
+
+    regenerate = RoomManager._regenerate
+    calls = []
+
+    async def unstable(self, *args):
+        worker, generated = await regenerate(self, *args)
+        calls.append(generated)
+        return worker, dataclasses.replace(generated, fingerprint=f"run {len(calls)}")
+
+    monkeypatch.setattr(RoomManager, "_regenerate", unstable)
+    assert "cette seed ne peut pas être reproduite" in await logic()
+    assert len(calls) == 2 and not runtime.logic.active
 
 
 @requires_ap_server

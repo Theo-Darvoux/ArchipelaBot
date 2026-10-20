@@ -499,8 +499,10 @@ async def test_unused_apworlds_are_not_regenerated(bot, game):
     entries, _, _ = await bot.games.entries(record)
     assert "custom_worlds/spire.apworld" in [name for name, _ in entries]  # still handed to whoever generates
 
+    # a game picked at random could be any of them
     await bot.games.upload(record, 3, [FakeAttachment("r.yaml", b"name: R\ngame:\n  Hacknet: 1\n  Celeste: 1\n")])
-    assert len(await bot.games.files(record)) == 1  # closed to players
+    names = [name for name, _ in await bot.games.generation_files(thread.id, [])]
+    assert "custom_worlds/spire.apworld" in names
 
 
 @requires_ap_server

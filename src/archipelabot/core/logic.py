@@ -23,6 +23,7 @@ WORKER = Path(__file__).with_name("logic_worker.py")
 VERSION = re.compile(r'^__version__ = "(?P<version>[^"]+)"', re.MULTILINE)
 SPOILER_PLAYER = re.compile(r"^Player \d+: (?P<name>.*)$")
 SPOILER_OPTION = re.compile(r"^(?P<key>[^:]+):(?P<value>.*)$")
+SAME_OPTIONS = "- Options identiques, mais pas les items."
 PLAYTHROUGH = "\n\nPlaythrough:"
 HEADER = re.compile(r"Archipelago Version (?P<version>\S+)\s+-\s+Seed: (?P<seed>\d+)")
 PLANDO = re.compile(r"^Plando Options:[ \t]*(?P<plando>.*?)[ \t]*$", re.MULTILINE)
@@ -165,8 +166,7 @@ def spoiler_differences(expected: str, regenerated: str, limit: int = 10) -> lis
         expected_line = locations[first] if first < len(locations) else "—"
         new_line = new_locations[first] if first < len(new_locations) else "—"
         lines = [
-            "- Options identiques, mais pas les items : apworld d'une autre version, ou world qui ne se génère pas "
-            "deux fois pareil.",
+            SAME_OPTIONS,
             f"- Premier écart : `{expected_line}` dans le spoiler, `{new_line}` regénéré",
         ]
     return [line[:300] for line in lines[:limit]] + (

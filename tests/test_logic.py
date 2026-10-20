@@ -15,6 +15,7 @@ from archipelabot.core.logic import (
     find_installs,
     pick_install,
     read_spoiler,
+    scout_world,
     spoiler_differences,
 )
 from archipelabot.core.progress import Baseline
@@ -375,7 +376,10 @@ async def test_same_options_but_other_items_regenerate_twice(bot, game, ap_serve
         return str(error.value)
 
     text = await logic()
-    assert "- Options identiques, mais pas les items.\n- Premier écart : `First Strawberry (Alice): Nothing`" in text
+    assert (
+        "- Options identiques, mais pas les items.\n- Premier écart : `First Strawberry (Alice): Nothing (Carol)`"
+        in text
+    )
     assert "- Deux regénérations sur le bot donnent les mêmes items" in text
 
     regenerate = RoomManager._regenerate
@@ -386,9 +390,26 @@ async def test_same_options_but_other_items_regenerate_twice(bot, game, ap_serve
         calls.append(generated)
         return worker, dataclasses.replace(generated, fingerprint=f"run {len(calls)}")
 
+    # a world that never generates the same: the room's items, in the regenerated rules
     monkeypatch.setattr(RoomManager, "_regenerate", unstable)
-    assert "cette seed ne peut pas être reproduite" in await logic()
-    assert len(calls) == 2 and not runtime.logic.active
+    interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
+    await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, content))
+    assert "les items viennent de la room" in view_text(interaction.followup.sent[0]["view"])
+    assert len(calls) == 2 and runtime.logic.active and runtime.record.logic.from_room
+    monkeypatch.undo()
+    worker = runtime.logic._worker
+    for slot in (1, 2, 3):
+        assert await worker.placements(slot) == await scout_world(
+            ap_server.address, None, runtime.tracker.state.name(slot)
+        )
+    assert set(runtime.logic.results) == {1, 2, 3}
+
+    await bot.rooms.shutdown()
+    bot.rooms = RoomManager(bot)
+    await bot.rooms.restore()
+    runtime = bot.rooms.by_thread(thread.id)
+    await wait_until(lambda: len(runtime.logic.results) == 3, 60)
+    assert runtime.record.logic.from_room
 
 
 @requires_ap_server

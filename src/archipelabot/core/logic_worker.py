@@ -38,6 +38,8 @@ def main() -> None:
                     answer({"placements": placements(multiworld, request["slot"])})
                 case "spoiler":
                     answer({"spoiler": spoiler(multiworld)})
+                case "place":
+                    answer({"unmatched": place(multiworld, request["placements"])})
                 case other:
                     answer({"error": f"unknown command {other}"})
         except Exception as e:
@@ -142,6 +144,25 @@ def placements(multiworld, player: int) -> dict[int, list[int]]:
         for loc in multiworld.get_locations(player)
         if loc.address is not None and loc.item is not None and loc.item.code is not None
     }
+
+
+def place(multiworld, placements: dict[str, dict[str, list[int]]]) -> int:
+    """Put the room's items in the regenerated locations, for a seed whose fill can't be reproduced.
+
+    Returns how many locations are only in the room or only in the regeneration.
+    """
+    locations = {(loc.player, loc.address): loc for loc in multiworld.get_locations() if loc.address is not None}
+    unmatched = 0
+    for player, items in placements.items():
+        for address, (item_id, receiver) in items.items():
+            location = locations.pop((int(player), int(address)), None)
+            world = multiworld.worlds.get(receiver)
+            if location is None or world is None or item_id not in world.item_id_to_name:
+                unmatched += 1
+                continue
+            item = world.create_item(world.item_id_to_name[item_id])
+            location.item, item.location = item, location
+    return unmatched + len(locations)
 
 
 def spoiler(multiworld) -> str:

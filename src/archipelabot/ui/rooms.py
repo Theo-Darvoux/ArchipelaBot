@@ -45,7 +45,7 @@ from .panel_buttons import ClaimButton, MyHintsButton, SettingsButton
 from .render.feed import feed_view
 from .render.panel import panel_view
 from .render.recap import CHART_FILENAME, recap_view
-from .render.text import md
+from .render.text import md, plural
 from .services.feed import FeedMessage, FeedService
 from .services.logic import LogicService
 from .services.notify import NotifyService
@@ -419,59 +419,90 @@ class RoomManager:
             raise
         return worker, generated
 
-    async def enable_logic(self, runtime: RoomRuntime, spoiler: Spoiler) -> None:
-        """Regenerate the room's seed from its post's yamls and apworlds, check it's the same, then use it."""
+    async def enable_logic(self, runtime: RoomRuntime, spoiler: Spoiler) -> bool:
+        """Regenerate the room's seed from its post's yamls and apworlds, check it's the same, then use it.
+
+        Returns whether the items come from the room: same options, but a fill no regeneration can reproduce.
+        """
         worker, generated = await self._regenerate(runtime, spoiler.seed, spoiler.plando, spoiler.version)
+        from_room = False
         try:
             record = runtime.record
-            try:
-                expected = await scout_world(runtime.tracker.state.address, record.password, record.slot)
-            except (APError, TimeoutError) as e:
-                raise LogicError(
-                    "Impossible de joindre la room pour vérifier la regénération. Réessaie plus tard."
-                ) from e
             slot = runtime.tracker.state.slot_by_name(record.slot)
-            if slot is None or await worker.placements(slot) != expected:
+            expected = await self._scout(runtime, [record.slot])
+            if slot is None or await worker.placements(slot) != expected.get(record.slot):
                 differences = spoiler_differences(spoiler.text, await worker.spoiler()) if spoiler.text else []
-                if differences[:1] == [SAME_OPTIONS]:
-                    differences.append(await self._determinism(runtime, spoiler, generated))
-                raise LogicError(
-                    f"La regénération (Archipelago {generated.version}) ne donne pas les mêmes items que la room : "
-                    "yamls ou apworlds différents, ou options aléatoires tirées par le site d'Archipelago."
-                    + "".join(f"\n{line}" for line in differences)
-                )
+                if differences[:1] != [SAME_OPTIONS]:
+                    raise self._not_the_room(generated, differences)
+                if await self._reproducible(runtime, spoiler, generated):
+                    raise self._not_the_room(
+                        generated,
+                        [
+                            *differences,
+                            "- Deux regénérations sur le bot donnent les mêmes items : un apworld n'est sans doute pas "
+                            f"dans la version de l'hôte, vérifie avec {self.bot.command_mention('track apworlds')}.",
+                        ],
+                    )
+                await self._use_room_items(runtime, worker)
+                from_room = True
         except BaseException:
             await worker.close()
             raise
-        record.logic = LogicSetup(spoiler.seed, spoiler.plando, generated.fingerprint, generated.version)
+        record.logic = LogicSetup(spoiler.seed, spoiler.plando, generated.fingerprint, generated.version, from_room)
         await self.repo.save_logic(record)
         await runtime.logic.use(worker)
         runtime.panel.request_update(urgent=True)
+        return from_room
 
-    async def _determinism(self, runtime: RoomRuntime, spoiler: Spoiler, generated: Generated) -> str:
-        """Same options, other items: an apworld of another version, or a world that never generates the same."""
+    @staticmethod
+    def _not_the_room(generated: Generated, differences: list[str]) -> LogicError:
+        return LogicError(
+            f"La regénération (Archipelago {generated.version}) ne donne pas les mêmes items que la room : "
+            "yamls ou apworlds différents, ou options aléatoires tirées par le site d'Archipelago."
+            + "".join(f"\n{line}" for line in differences)
+        )
+
+    async def _reproducible(self, runtime: RoomRuntime, spoiler: Spoiler, generated: Generated) -> bool:
+        """Same options, other items: an apworld of another version, unless the bot can't reproduce it either."""
         worker, again = await self._regenerate(runtime, spoiler.seed, spoiler.plando, spoiler.version)
         await worker.close()
-        if again.fingerprint != generated.fingerprint:
-            return (
-                "- Deux regénérations sur le bot ne donnent pas les mêmes items non plus : un des worlds ne se génère "
-                "jamais deux fois pareil, cette seed ne peut pas être reproduite."
+        return again.fingerprint == generated.fingerprint
+
+    async def _scout(self, runtime: RoomRuntime, names: list[str]) -> dict[str, dict[int, tuple[int, int]]]:
+        """What every location of these slots holds, asked to the room."""
+        state, record = runtime.tracker.state, runtime.record
+        try:
+            found = await asyncio.gather(*(scout_world(state.address, record.password, name) for name in names))
+        except (APError, TimeoutError) as e:
+            raise LogicError("Impossible de joindre la room pour vérifier la regénération. Réessaie plus tard.") from e
+        return dict(zip(names, found, strict=True))
+
+    async def _use_room_items(self, runtime: RoomRuntime, worker: LogicWorker) -> None:
+        players = runtime.tracker.state.players
+        found = await self._scout(runtime, [p.name for p in players])
+        if unmatched := await worker.place({p.slot: found[p.name] for p in players}):
+            raise LogicError(
+                f"La seed ne se regénère jamais deux fois pareil, et ses locations ne correspondent pas à celles de "
+                f"la room ({plural(unmatched, 'location')} en trop ou en moins) : la logique est impossible."
             )
-        return (
-            "- Deux regénérations sur le bot donnent les mêmes items : un apworld n'est sans doute pas dans la version "
-            f"de l'hôte, vérifie avec {self.bot.command_mention('track apworlds')}."
-        )
 
     async def _resume_logic(self, runtime: RoomRuntime) -> None:
         record = runtime.record
         assert record.logic is not None
+        logic = record.logic
         try:
-            logic = record.logic
             worker, generated = await self._regenerate(runtime, logic.seed, logic.plando, logic.version)
         except LogicError as e:
             log.warning("Could not regenerate room %s: %s", record.id, e)
             return
-        if generated.fingerprint != record.logic.fingerprint:
+        if logic.from_room:
+            try:
+                await self._use_room_items(runtime, worker)
+            except LogicError as e:
+                await worker.close()
+                log.warning("Could not place the items of room %s: %s", record.id, e)
+                return
+        elif generated.fingerprint != logic.fingerprint:
             await worker.close()
             log.warning("Room %s no longer regenerates the same (Archipelago %s)", record.id, generated.version)
             record.logic = None

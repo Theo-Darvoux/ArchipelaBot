@@ -150,6 +150,9 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE room ADD COLUMN logic_version TEXT;
     """,
+    """
+    ALTER TABLE room ADD COLUMN logic_from_room INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

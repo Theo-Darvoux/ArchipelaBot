@@ -55,6 +55,7 @@ class LogicSetup:
     plando: str
     fingerprint: str
     version: str = ""  # of Archipelago, "" before versions were kept: the newest installed
+    from_room: bool = False  # the fill can't be reproduced: the items come from the room
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +299,11 @@ class LogicWorker:
             int(slot): SlotLogic(frozenset(info["accessible"]), info["goal"], tuple(info["unlocks"]))
             for slot, info in answer["slots"].items()
         }
+
+    async def place(self, placements: dict[int, dict[int, tuple[int, int]]]) -> int:
+        """Use the room's items instead of the regenerated ones; returns how many locations did not match."""
+        request = {slot: {loc: list(item) for loc, item in items.items()} for slot, items in placements.items()}
+        return (await self._request({"cmd": "place", "placements": request}))["unmatched"]
 
     async def spoiler(self) -> str:
         """The spoiler log of the regenerated seed, without its playthrough."""

@@ -150,7 +150,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             raise UserError(f"Fichier trop gros (plus de {MAX_SPOILER // 1024 // 1024} Mo).")
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            await self.bot.rooms.enable_logic(runtime, read_spoiler(spoiler.filename, await spoiler.read()))
+            from_room = await self.bot.rooms.enable_logic(runtime, read_spoiler(spoiler.filename, await spoiler.read()))
         except LogicError as e:
             raise UserError(str(e)) from e
         except discord.HTTPException as e:
@@ -161,9 +161,15 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             f"{E.reachable} Logique activée : le panneau montre maintenant qui est bloqué et combien de checks chacun "
             "peut faire, d'après la logique du jeu."
         )
+        if from_room:
+            text += (
+                "\n⚠️ Un des worlds ne se génère jamais deux fois pareil : les items viennent de la room, les règles de "
+                "la regénération. Si ce world tire aussi ses règles au hasard, sa logique peut être fausse."
+            )
         if blocked:
             text += f"\n-# Bloqués en ce moment : {', '.join(blocked)}."
-        await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
+        tone = Tone.WARNING if from_room else Tone.SUCCESS
+        await interaction.followup.send(view=notice(text, tone), ephemeral=True)
 
     @app_commands.command(name="apworlds", description="Choisir les apworlds qui ont servi à générer cette partie")
     async def apworlds(self, interaction: Interaction) -> None:

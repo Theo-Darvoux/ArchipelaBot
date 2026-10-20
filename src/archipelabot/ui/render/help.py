@@ -39,9 +39,10 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
         f"{cmd('blame')} : avec la logique, désigne qui a en logique les items du plus de joueurs bloqués\n"
         f"{cmd('track apworlds')} : choisir après coup les apworlds de la partie, parmi ceux envoyés au serveur "
         f"(dans les inscriptions ou avec {cmd('apworld envoyer')})\n"
+        f"{cmd('track yamls')} : corriger après coup les yamls de la partie, pour qu'ils regénèrent la room\n"
         f"{cmd('recap')} : publier le récap (podium, chiffres, graphique), même après l'arrêt\n"
         f"{cmd('track stop')} : arrêter le suivi, ou revenir aux inscriptions après un mauvais lien\n"
-        "-# Réglages, reconnexion, logique, apworlds, récap et arrêt : la personne qui a lancé le suivi ou un "
+        "-# Réglages, reconnexion, logique, apworlds, yamls, récap et arrêt : la personne qui a lancé le suivi ou un "
         "modérateur."
     )
     notifs = (

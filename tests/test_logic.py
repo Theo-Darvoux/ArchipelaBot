@@ -4,7 +4,17 @@ import zipfile
 import pytest
 
 from archipelabot.core import events as ev
-from archipelabot.core.logic import Generated, LogicError, LogicWorker, SlotLogic, blame, check_room, read_spoiler
+from archipelabot.core.logic import (
+    Generated,
+    LogicError,
+    LogicWorker,
+    SlotLogic,
+    blame,
+    check_room,
+    find_installs,
+    pick_install,
+    read_spoiler,
+)
 from archipelabot.core.progress import Baseline
 from archipelabot.core.room import RoomState, SlotInfo
 from archipelabot.errors import UserError
@@ -68,6 +78,34 @@ def test_the_regenerated_seed_must_be_the_room():
         "\n- slot 1 : `Alice` (*A*) dans la room, `Bob` (*B*) regénéré"
         "\n- slot 2 : `Bob` (*B*) dans la room, `Alice` (*A*) regénéré"
     )
+
+
+def fake_install(folder, version: str):
+    folder.mkdir(parents=True)
+    (folder / "Utils.py").write_text(f'import os\n\n__version__ = "{version}"\n')
+    return folder
+
+
+def test_the_spoiler_picks_the_archipelago_version(tmp_path):
+    single = fake_install(tmp_path / "ap", "0.6.8")
+    assert find_installs(single)["0.6.8"].python == single / ".venv" / "bin" / "python"
+    assert find_installs(single, tmp_path / "python")["0.6.8"].python == tmp_path / "python"
+    assert find_installs(None) == find_installs(tmp_path / "nowhere") == {}
+
+    versions = tmp_path / "versions"
+    for version in ("0.6.10", "0.6.7", "0.6.8"):
+        fake_install(versions / version, version)
+    (versions / "notes").mkdir()
+    installs = find_installs(versions, tmp_path / "python")
+    assert set(installs) == {"0.6.7", "0.6.8", "0.6.10"}
+    assert pick_install(installs, "0.6.7").python == versions / "0.6.7" / ".venv" / "bin" / "python"
+    assert pick_install(installs, "").version == "0.6.10"  # logic enabled before versions were kept
+    with pytest.raises(
+        LogicError, match=r"Archipelago 0\.6\.6, que le bot n'a pas \(il a : 0\.6\.7, 0\.6\.8, 0\.6\.10\)"
+    ):
+        pick_install(installs, "0.6.6")
+    with pytest.raises(LogicError, match="pas installé"):
+        pick_install({}, "0.6.8")
 
 
 def test_panel_shows_who_is_blocked():
@@ -219,6 +257,7 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     await bot.rooms.restore()
     runtime = bot.rooms.by_thread(thread.id)
     await wait_until(lambda: len(runtime.logic.results) == 3, 60)
+    assert runtime.record.logic.version == "0.6.8"
 
     stranger = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=FakeUser(id=5))
     with pytest.raises(UserError, match="Seule la personne"):
@@ -229,7 +268,7 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
 
 
 @requires_ap_server
-async def test_logic_needs_the_yamls_and_archipelago(bot, discord_env, ap_server):  # noqa: F811
+async def test_logic_needs_the_yamls_and_archipelago(bot, discord_env, ap_server, tmp_path):  # noqa: F811
     guild, forum = discord_env
     cog = bot.get_cog("track")
     interaction = FakeInteraction(guild=guild)
@@ -242,6 +281,9 @@ async def test_logic_needs_the_yamls_and_archipelago(bot, discord_env, ap_server
     status = bot.get_cog("status")
     with pytest.raises(UserError, match="spoiler log"):
         await status.blame.callback(status, here)
-    bot.settings.archipelago_path = AP_DIR
+    bot.settings.archipelago_path = tmp_path
+    (tmp_path / "0.6.8").symlink_to(AP_DIR)
     with pytest.raises(UserError, match="Il faut les yamls"):
         await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER))
+    with pytest.raises(UserError, match=r"0\.6\.7, que le bot n'a pas"):
+        await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER.replace(b"0.6.8", b"0.6.7")))

@@ -20,6 +20,7 @@ from .room import RoomState
 log = logging.getLogger(__name__)
 
 WORKER = Path(__file__).with_name("logic_worker.py")
+VERSION = re.compile(r'^__version__ = "(?P<version>[^"]+)"', re.MULTILINE)
 HEADER = re.compile(r"Archipelago Version (?P<version>\S+)\s+-\s+Seed: (?P<seed>\d+)")
 PLANDO = re.compile(r"^Plando Options:[ \t]*(?P<plando>.*?)[ \t]*$", re.MULTILINE)
 DEFAULT_PLANDO = "bosses, connections, texts"
@@ -48,6 +49,45 @@ class LogicSetup:
     seed: int
     plando: str
     fingerprint: str
+    version: str = ""  # of Archipelago, "" before versions were kept: the newest installed
+
+
+@dataclass(frozen=True, slots=True)
+class Install:
+    version: str
+    path: Path
+    python: Path
+
+
+def find_installs(path: Path | None, python: Path | None = None) -> dict[str, Install]:
+    """Archipelago source folders with their .venv: `path` itself, or one per version inside it."""
+    if path is None or not path.is_dir():
+        return {}
+    single = (path / "Utils.py").is_file()
+    installs = {}
+    for folder in [path] if single else sorted(f for f in path.iterdir() if (f / "Utils.py").is_file()):
+        if match := VERSION.search((folder / "Utils.py").read_text(errors="replace")):
+            interpreter = python if single and python else folder / ".venv" / "bin" / "python"
+            installs[match["version"]] = Install(match["version"], folder, interpreter)
+    return installs
+
+
+def pick_install(installs: dict[str, Install], version: str) -> Install:
+    if not installs:
+        raise LogicError("Archipelago n'est pas installé avec ce bot : la logique n'est pas disponible.")
+    if not version:
+        return installs[max(installs, key=_version_key)]
+    if version not in installs:
+        known = ", ".join(sorted(installs, key=_version_key))
+        raise LogicError(
+            f"Cette seed a été générée avec Archipelago {version}, que le bot n'a pas (il a : {known}) : la "
+            "regénération ne donnerait pas la même seed."
+        )
+    return installs[version]
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) if part.isdigit() else 0 for part in version.split("."))
 
 
 @dataclass(frozen=True, slots=True)

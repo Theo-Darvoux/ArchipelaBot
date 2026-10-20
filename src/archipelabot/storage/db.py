@@ -147,6 +147,9 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE guild_config ADD COLUMN admin_only_games INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    ALTER TABLE room ADD COLUMN logic_version TEXT;
+    """,
 ]
 
 

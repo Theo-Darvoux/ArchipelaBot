@@ -97,10 +97,11 @@ class RoomRepo:
         logic = room.logic
         await self._update(
             room,
-            "logic_seed = ?, logic_plando = ?, logic_fingerprint = ?",
+            "logic_seed = ?, logic_plando = ?, logic_fingerprint = ?, logic_version = ?",
             logic and str(logic.seed),
             logic and logic.plando,
             logic and logic.fingerprint,
+            logic and logic.version,
         )
 
     async def set_status(self, room: RoomRecord, status: RoomStatus) -> None:
@@ -135,7 +136,9 @@ class RoomRepo:
                 created_by=row["created_by"],
                 created_at=_parse_utc(row["created_at"]),
                 ended_at=_parse_utc(row["ended_at"]) if row["ended_at"] else None,
-                logic=LogicSetup(int(row["logic_seed"]), row["logic_plando"], row["logic_fingerprint"])
+                logic=LogicSetup(
+                    int(row["logic_seed"]), row["logic_plando"], row["logic_fingerprint"], row["logic_version"] or ""
+                )
                 if row["logic_seed"]
                 else None,
             )

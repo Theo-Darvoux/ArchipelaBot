@@ -88,12 +88,13 @@ après chaque check calcule, avec les items reçus par chacun :
 - 🔓 **N checks en logique** : les checks que le joueur peut faire tout de suite ;
 - 🔒 **bloqué** : aucun check ni l'objectif en logique, il doit attendre des items des autres.
 
-Il faut les yamls et apworlds exacts de la génération, la même version d'Archipelago que le bot, et une partie
-générée hors race mode. Pour une partie générée sur archipelago.gg à partir des yamls, les options `random` des yamls
+Il faut les yamls et apworlds exacts de la génération, une version d'Archipelago installée avec le bot (celle du
+spoiler est choisie), et une partie générée hors race mode. Pour une partie générée sur archipelago.gg à partir des yamls, les options `random` des yamls
 ne sont pas reproductibles : la vérification échouera. « En logique » ne compte pas les astuces hors logique.
 
 Côté bot, il faut une installation d'Archipelago (`ARCHIPELAGO_PATH` dans le `.env`, avec son Python dans
-`.venv/bin/python` ou `ARCHIPELAGO_PYTHON`) ; l'image Docker l'inclut. **Attention** : la regénération exécute le
+`.venv/bin/python` ou `ARCHIPELAGO_PYTHON`), ou un dossier qui en contient une par version, chacune avec son
+`.venv`. L'image Docker inclut les versions de `ARCHIPELAGO_VERSIONS` (`--build-arg ARCHIPELAGO_VERSIONS="0.6.7 0.6.8"`). **Attention** : la regénération exécute le
 code des apworlds envoyés dans le post, sur la machine du bot, dans un processus à part sans les variables
 d'environnement du bot (le token Discord n'y est pas), mais avec les mêmes droits sur les fichiers. N'active pas la
 logique pour une partie si tu n'as pas confiance dans ses apworlds.

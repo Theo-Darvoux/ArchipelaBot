@@ -17,7 +17,17 @@ from ..ap.client import APError, ConnectOptions
 from ..ap.webhost import RoomNotFound, WebhostError
 from ..core import events as ev
 from ..core.chat import ChatRelay
-from ..core.logic import Generated, LogicError, LogicSetup, LogicWorker, Spoiler, check_room, scout_world
+from ..core.logic import (
+    Generated,
+    LogicError,
+    LogicSetup,
+    LogicWorker,
+    Spoiler,
+    check_room,
+    find_installs,
+    pick_install,
+    scout_world,
+)
 from ..core.progress import Baseline, Progress, direct_baseline, webhost_baseline
 from ..core.room import AddressResolver, RoomState, RoomTracker, SlotInfo, Waker
 from ..errors import UserError
@@ -387,19 +397,19 @@ class RoomManager:
             return fetch
         return lambda: direct_baseline(state.address, record.password, state)
 
-    async def _regenerate(self, runtime: RoomRuntime, seed: int, plando: str) -> tuple[LogicWorker, Generated]:
+    async def _regenerate(
+        self, runtime: RoomRuntime, seed: int, plando: str, version: str
+    ) -> tuple[LogicWorker, Generated]:
         settings = self.bot.settings
-        if settings.archipelago_path is None or settings.logic_python is None:
-            raise LogicError("Archipelago n'est pas installé avec ce bot : la logique n'est pas disponible.")
+        installs = await asyncio.to_thread(find_installs, settings.archipelago_path, settings.archipelago_python)
+        install = pick_install(installs, version)
         files = await self.bot.games.generation_files(runtime.record.thread_id or 0, runtime.tracker.state.players)
         if files is None:
             raise LogicError(
                 "Il faut les yamls de la partie : la logique ne marche que pour une room lancée depuis le post d'une "
                 "partie (`/partie nouvelle`)."
             )
-        worker, generated = await LogicWorker.start(
-            settings.logic_python, settings.archipelago_path, seed, plando, files
-        )
+        worker, generated = await LogicWorker.start(install.python, install.path, seed, plando, files)
         try:
             check_room(generated, runtime.tracker.state)
         except BaseException:
@@ -409,7 +419,7 @@ class RoomManager:
 
     async def enable_logic(self, runtime: RoomRuntime, spoiler: Spoiler) -> None:
         """Regenerate the room's seed from its post's yamls and apworlds, check it's the same, then use it."""
-        worker, generated = await self._regenerate(runtime, spoiler.seed, spoiler.plando)
+        worker, generated = await self._regenerate(runtime, spoiler.seed, spoiler.plando, spoiler.version)
         try:
             record = runtime.record
             try:
@@ -420,15 +430,14 @@ class RoomManager:
                 ) from e
             slot = runtime.tracker.state.slot_by_name(record.slot)
             if slot is None or await worker.placements(slot) != expected:
-                versions = f"spoiler : {spoiler.version}, bot : {generated.version}"
                 raise LogicError(
-                    "La regénération ne donne pas les mêmes items que la room : yamls, apworlds ou version "
-                    f"d'Archipelago différents ({versions})."
+                    f"La regénération (Archipelago {generated.version}) ne donne pas les mêmes items que la room : "
+                    "yamls ou apworlds différents, ou options aléatoires tirées par le site d'Archipelago."
                 )
         except BaseException:
             await worker.close()
             raise
-        record.logic = LogicSetup(spoiler.seed, spoiler.plando, generated.fingerprint)
+        record.logic = LogicSetup(spoiler.seed, spoiler.plando, generated.fingerprint, generated.version)
         await self.repo.save_logic(record)
         await runtime.logic.use(worker)
         runtime.panel.request_update(urgent=True)
@@ -437,7 +446,8 @@ class RoomManager:
         record = runtime.record
         assert record.logic is not None
         try:
-            worker, generated = await self._regenerate(runtime, record.logic.seed, record.logic.plando)
+            logic = record.logic
+            worker, generated = await self._regenerate(runtime, logic.seed, logic.plando, logic.version)
         except LogicError as e:
             log.warning("Could not regenerate room %s: %s", record.id, e)
             return

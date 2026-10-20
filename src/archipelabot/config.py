@@ -12,11 +12,6 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/archipelabot.db")
     log_level: str = "INFO"
     timezone: str = "Europe/Paris"
-    archipelago_path: Path | None = None  # an Archipelago source folder, to compute who is blocked
-    archipelago_python: Path | None = None
-
-    @property
-    def logic_python(self) -> Path | None:
-        if self.archipelago_path is None:
-            return None
-        return self.archipelago_python or self.archipelago_path / ".venv" / "bin" / "python"
+    # an Archipelago source folder, or a folder of them for several versions, to compute who is blocked
+    archipelago_path: Path | None = None
+    archipelago_python: Path | None = None  # for a single folder without its .venv

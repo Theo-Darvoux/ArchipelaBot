@@ -10,7 +10,6 @@ import pytest
 from archipelabot.core import events as ev
 from archipelabot.errors import UserError
 from archipelabot.storage.guilds import GuildConfig
-from archipelabot.ui.apworlds import GameYamlsView
 from archipelabot.ui.games import ZIP_OVERHEAD, GameManager
 from archipelabot.ui.signup_buttons import MyYamlsView, UploadReport, YamlButton, YamlModal, YamlsZipButton
 

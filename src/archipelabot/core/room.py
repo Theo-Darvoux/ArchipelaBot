@@ -245,7 +245,7 @@ class RoomTracker:
             finder=hint.finding_player,
             receiver=hint.receiving_player,
             item=self._item_name(hint.receiving_player, hint.item),
-            location=self._location_name(hint.finding_player, hint.location),
+            location=self.location_name(hint.finding_player, hint.location),
             flags=hint.item_flags,
             status=p.HintStatus.FOUND if hint.found else hint.status,
             found=hint.found,
@@ -257,7 +257,7 @@ class RoomTracker:
         game = self.state.game(receiver)
         return self.datapackages.item_name(game, self._checksums.get(game, ""), item_id)
 
-    def _location_name(self, finder: int, location_id: int) -> str:
+    def location_name(self, finder: int, location_id: int) -> str:
         game = self.state.game(finder)
         return self.datapackages.location_name(game, self._checksums.get(game, ""), location_id)
 
@@ -406,7 +406,7 @@ class RoomTracker:
             finder=finder,
             receiver=receiver,
             item=self._item_name(receiver, item.item),
-            location=self._location_name(finder, item.location),
+            location=self.location_name(finder, item.location),
             flags=item.flags,
             location_id=item.location,
         )

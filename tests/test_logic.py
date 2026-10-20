@@ -238,6 +238,23 @@ async def test_playing_only_what_is_in_logic_finishes_the_seed():
 
 
 @requires_ap_server
+async def test_the_room_items_replace_a_fill_that_cannot_be_reproduced():
+    worker, _ = await start_dev_worker()
+    try:
+        room = {slot: await worker.placements(slot) for slot in (1, 2, 3)}
+        first, second = list(room[1])[:2]
+        room[1][first], room[1][second] = room[1][second], room[1][first]
+        assert await worker.place(room) == 0
+        assert {slot: await worker.placements(slot) for slot in (1, 2, 3)} == room
+        assert len(await worker.evaluate({1: [], 2: [], 3: []})) == 3
+
+        room[2][999999999] = room[2].pop(next(iter(room[2])))
+        assert await worker.place(room) == 2  # one only in the room, one only in the regeneration
+    finally:
+        await worker.close()
+
+
+@requires_ap_server
 async def test_generation_errors_are_reported():
     with pytest.raises(LogicError, match="Erreur d'Archipelago"):
         await start_dev_worker([("Players/p1.yaml", b"name: Alice\ngame: Not A Game\n")])

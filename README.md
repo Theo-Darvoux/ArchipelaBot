@@ -90,7 +90,10 @@ après chaque check calcule, avec les items reçus par chacun :
 
 Il faut les yamls et apworlds exacts de la génération, une version d'Archipelago installée avec le bot (celle du
 spoiler est choisie), et une partie générée hors race mode. Pour une partie générée sur archipelago.gg à partir des yamls, les options `random` des yamls
-ne sont pas reproductibles : la vérification échouera. « En logique » ne compte pas les astuces hors logique.
+ne sont pas reproductibles : la vérification échouera. Si les options sont les bonnes mais qu'un world ne se génère
+jamais deux fois pareil, le bot garde les règles de la regénération et prend les items de la room (en se connectant
+à chaque slot comme tracker) ; la logique de ce world peut alors être fausse s'il tire aussi ses règles au hasard.
+« En logique » ne compte pas les astuces hors logique.
 
 Côté bot, il faut une installation d'Archipelago (`ARCHIPELAGO_PATH` dans le `.env`, avec son Python dans
 `.venv/bin/python` ou `ARCHIPELAGO_PYTHON`), ou un dossier qui en contient une par version, chacune avec son

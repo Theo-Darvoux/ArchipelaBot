@@ -42,13 +42,13 @@ class StatusCog(commands.Cog, name="status"):
             await interaction.response.send_message(view=runtime.render_panel(buttons=False), ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            view=player_status_view(slots[0], state, progress, runtime.claims, runtime.logic.results), ephemeral=True
-        )
+        def status(slot: int) -> discord.ui.LayoutView:
+            logic, names = runtime.logic.results, runtime.tracker.location_name
+            return player_status_view(slot, state, progress, runtime.claims, logic, names)
+
+        await interaction.response.send_message(view=status(slots[0]), ephemeral=True)
         for slot in slots[1:]:
-            await interaction.followup.send(
-                view=player_status_view(slot, state, progress, runtime.claims, runtime.logic.results), ephemeral=True
-            )
+            await interaction.followup.send(view=status(slot), ephemeral=True)
 
     @app_commands.command(name="hints", description="Les hints de cette room (visibles seulement par toi)")
     @app_commands.describe(joueur="Par défaut : tes hints, ou tous les hints si tu n'as pas de slot")

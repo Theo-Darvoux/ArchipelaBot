@@ -27,6 +27,7 @@ from ..core.logic import (
     find_installs,
     pick_install,
     scout_world,
+    spoiler_differences,
 )
 from ..core.progress import Baseline, Progress, direct_baseline, webhost_baseline
 from ..core.room import AddressResolver, RoomState, RoomTracker, SlotInfo, Waker
@@ -430,9 +431,11 @@ class RoomManager:
                 ) from e
             slot = runtime.tracker.state.slot_by_name(record.slot)
             if slot is None or await worker.placements(slot) != expected:
+                differences = spoiler_differences(spoiler.text, await worker.spoiler()) if spoiler.text else []
                 raise LogicError(
                     f"La regénération (Archipelago {generated.version}) ne donne pas les mêmes items que la room : "
                     "yamls ou apworlds différents, ou options aléatoires tirées par le site d'Archipelago."
+                    + "".join(f"\n{line}" for line in differences)
                 )
         except BaseException:
             await worker.close()

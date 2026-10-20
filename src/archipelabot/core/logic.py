@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 
 WORKER = Path(__file__).with_name("logic_worker.py")
 VERSION = re.compile(r'^__version__ = "(?P<version>[^"]+)"', re.MULTILINE)
+SPOILER_PLAYER = re.compile(r"^Player \d+: (?P<name>.*)$")
+SPOILER_OPTION = re.compile(r"^(?P<key>[^:]+):(?P<value>.*)$")
+PLAYTHROUGH = "\n\nPlaythrough:"
 HEADER = re.compile(r"Archipelago Version (?P<version>\S+)\s+-\s+Seed: (?P<seed>\d+)")
 PLANDO = re.compile(r"^Plando Options:[ \t]*(?P<plando>.*?)[ \t]*$", re.MULTILINE)
 DEFAULT_PLANDO = "bosses, connections, texts"
@@ -42,6 +45,7 @@ class Spoiler:
     seed: int
     plando: str
     version: str
+    text: str = ""  # up to the playthrough, to tell what a regeneration got wrong
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +138,65 @@ def read_spoiler(filename: str, content: bytes) -> Spoiler:
     if not (header := HEADER.search(head)):
         raise LogicError("Ce n'est pas un spoiler log d'Archipelago (`AP_…_Spoiler.txt`).")
     plando = PLANDO.search(head)
-    return Spoiler(int(header["seed"]), plando["plando"] if plando else DEFAULT_PLANDO, header["version"])
+    text = content.decode("utf-8-sig", errors="replace").split(PLAYTHROUGH, 1)[0]
+    return Spoiler(int(header["seed"]), plando["plando"] if plando else DEFAULT_PLANDO, header["version"], text)
+
+
+def spoiler_differences(expected: str, regenerated: str, limit: int = 10) -> list[str]:
+    """What differs between the spoiler of the room and the one of its regeneration: options first, then items."""
+    players, locations = _read_sections(expected)
+    new_players, new_locations = _read_sections(regenerated)
+    lines = []
+    for player, options in players.items():
+        who = f"`{player}` · " if player else ""
+        if (new := new_players.get(player)) is None:
+            lines.append(f"- `{player}` : dans le spoiler, pas regénéré")
+            continue
+        lines += [
+            f"- {who}{key} : `{options.get(key, '—')}` dans le spoiler, `{new.get(key, '—')}` regénéré"
+            for key in dict.fromkeys([*options, *new])
+            if options.get(key) != new.get(key)
+        ]
+    lines += [f"- `{player}` : regénéré, pas dans le spoiler" for player in new_players if player not in players]
+    if not lines and locations != new_locations:
+        if not locations:
+            return ["- Ce spoiler ne liste pas les items : génère avec `spoiler` à 1 ou plus pour en savoir plus."]
+        first = next((i for i, (a, b) in enumerate(zip(locations, new_locations, strict=False)) if a != b), None)
+        first = min(len(locations), len(new_locations)) if first is None else first
+        expected_line = locations[first] if first < len(locations) else "—"
+        new_line = new_locations[first] if first < len(new_locations) else "—"
+        lines = [
+            "- Options identiques, mais pas les items : apworld d'une autre version, ou world qui ne se génère pas "
+            "deux fois pareil.",
+            f"- Premier écart : `{expected_line}` dans le spoiler, `{new_line}` regénéré",
+        ]
+    return [line[:300] for line in lines[:limit]] + (
+        [f"- … et {len(lines) - limit} autres"] if len(lines) > limit else []
+    )
+
+
+def _read_sections(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Options of the header ("") and of each player, then the locations, from a spoiler log."""
+    players: dict[str, dict[str, str]] = {}
+    locations: list[str] = []
+    current: dict[str, str] | None = None
+    in_locations = False
+    for line in text.splitlines()[1:]:  # the first one is the version and seed, already checked
+        if in_locations:
+            if line:
+                locations.append(line)
+        elif line == "Locations:":
+            in_locations = True
+        elif player := SPOILER_PLAYER.match(line):
+            current = players.setdefault(player["name"], {})
+        elif not line:
+            current = None
+        else:
+            if current is None and not players:
+                current = players.setdefault("", {})
+            if current is not None and (option := SPOILER_OPTION.match(line)):
+                current[option["key"]] = option["value"].strip()
+    return players, locations
 
 
 def _spoiler_in_zip(content: bytes) -> bytes:
@@ -232,6 +294,10 @@ class LogicWorker:
             int(slot): SlotLogic(frozenset(info["accessible"]), info["goal"], tuple(info["unlocks"]))
             for slot, info in answer["slots"].items()
         }
+
+    async def spoiler(self) -> str:
+        """The spoiler log of the regenerated seed, without its playthrough."""
+        return (await self._request({"cmd": "spoiler"}))["spoiler"]
 
     async def placements(self, slot: int) -> dict[int, tuple[int, int]]:
         answer = await self._request({"cmd": "placements", "slot": slot})

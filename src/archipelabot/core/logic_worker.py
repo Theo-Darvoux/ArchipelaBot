@@ -36,6 +36,8 @@ def main() -> None:
                     answer({"slots": evaluate(multiworld, request["checked"])})
                 case "placements":
                     answer({"placements": placements(multiworld, request["slot"])})
+                case "spoiler":
+                    answer({"spoiler": spoiler(multiworld)})
                 case other:
                     answer({"error": f"unknown command {other}"})
         except Exception as e:
@@ -140,6 +142,16 @@ def placements(multiworld, player: int) -> dict[int, list[int]]:
         for loc in multiworld.get_locations(player)
         if loc.address is not None and loc.item is not None and loc.item.code is not None
     }
+
+
+def spoiler(multiworld) -> str:
+    path = os.path.join("output", "regenerated_spoiler.txt")
+    try:
+        multiworld.spoiler.to_file(path)
+    except Exception:
+        traceback.print_exc()  # some worlds need the output stage: keep what was written before
+    with open(path, encoding="utf-8-sig", errors="replace") as file:
+        return file.read().split("\n\nPlaythrough:", 1)[0]
 
 
 if __name__ == "__main__":

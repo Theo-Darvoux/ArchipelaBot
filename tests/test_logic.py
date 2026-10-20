@@ -14,6 +14,7 @@ from archipelabot.core.logic import (
     find_installs,
     pick_install,
     read_spoiler,
+    spoiler_differences,
 )
 from archipelabot.core.progress import Baseline
 from archipelabot.core.room import RoomState, SlotInfo
@@ -78,6 +79,57 @@ def test_the_regenerated_seed_must_be_the_room():
         "\n- slot 1 : `Alice` (*A*) dans la room, `Bob` (*B*) regénéré"
         "\n- slot 2 : `Bob` (*B*) dans la room, `Alice` (*A*) regénéré"
     )
+
+
+def dev_spoiler() -> str:
+    archive = zipfile.ZipFile(SEEDS[-1])
+    [name] = [n for n in archive.namelist() if n.endswith("_Spoiler.txt")]
+    return read_spoiler(name, archive.read(name)).text
+
+
+def test_spoilers_tell_what_a_regeneration_got_wrong():
+    spoiler = dev_spoiler()
+    assert "Playthrough" not in spoiler and spoiler_differences(spoiler, spoiler) == []
+
+    other = spoiler.replace("Player 2: Bob\nGame:                            A Short Hike", "Player 2: Bob\nGame: Hike")
+    other = other.replace("Total Strawberries:              20", "Total Strawberries:              30")
+    assert spoiler_differences(spoiler, other) == [
+        "- `Alice` · Total Strawberries : `20` dans le spoiler, `30` regénéré",
+        "- `Bob` · Game : `A Short Hike` dans le spoiler, `Hike` regénéré",
+    ]
+    assert spoiler_differences(spoiler, other.replace("Player 3: Carol", "Player 3: Eve"), limit=3) == [
+        "- `Alice` · Total Strawberries : `20` dans le spoiler, `30` regénéré",
+        "- `Bob` · Game : `A Short Hike` dans le spoiler, `Hike` regénéré",
+        "- `Carol` : dans le spoiler, pas regénéré",
+        "- … et 1 autres",
+    ]
+
+    swapped = spoiler.replace("First Strawberry (Alice): Map Width (Carol)", "First Strawberry (Alice): Nothing")
+    assert spoiler_differences(spoiler, swapped) == [
+        "- Options identiques, mais pas les items : apworld d'une autre version, ou world qui ne se génère pas "
+        "deux fois pareil.",
+        "- Premier écart : `First Strawberry (Alice): Map Width (Carol)` dans le spoiler, "
+        "`First Strawberry (Alice): Nothing` regénéré",
+    ]
+    short = spoiler.split("\n\nLocations:")[0]
+    assert "génère avec `spoiler` à 1" in spoiler_differences(short, spoiler)[0]
+
+
+@requires_ap_server
+async def test_the_regenerated_spoiler_is_the_room_one():
+    worker, _ = await start_dev_worker()
+    try:
+        assert spoiler_differences(dev_spoiler(), await worker.spoiler()) == []
+    finally:
+        await worker.close()
+    files = [(f"Players/{p.name}", p.read_bytes()) for p in sorted((DEV_DIR / "players").glob("*.yaml"))]
+    files[0] = (files[0][0], files[0][1].replace(b"Celeste 64: {}", b"Celeste 64:\n  total_strawberries: 30"))
+    worker, _ = await start_dev_worker(files)
+    try:
+        differences = spoiler_differences(dev_spoiler(), await worker.spoiler())
+    finally:
+        await worker.close()
+    assert "- `Alice` · Total Strawberries : `20` dans le spoiler, `30` regénéré" in differences
 
 
 def fake_install(folder, version: str):
@@ -265,6 +317,30 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     wrong = SPOILER.replace(b"Seed: 2036", b"Seed: 1036")
     with pytest.raises(UserError, match="la seed ne correspond pas"):
         await cog.logic.callback(cog, interaction, spoiler=FakeAttachment("AP_1_Spoiler.txt", wrong))
+
+
+@requires_ap_server
+async def test_wrong_yamls_are_explained(bot, game, ap_server):  # noqa: F811
+    record, thread = game
+    bot.settings.archipelago_path = AP_DIR
+    for user, name in ((1, "p1.yaml"), (2, "p2.yaml"), (3, "p3.yaml")):
+        content = (DEV_DIR / "players" / name).read_bytes()
+        content = content.replace(b"Celeste 64: {}", b"Celeste 64:\n  total_strawberries: 30")
+        await bot.games.upload(record, user, [FakeAttachment(name, content)])
+    cog = bot.get_cog("track")
+    host = FakeUser(id=77)
+    interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
+    await cog.start.callback(cog, interaction, lien=ap_server.address, slot="Carol", mot_de_passe=None, nom=None)
+    runtime = bot.rooms.by_thread(thread.id)
+    await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
+
+    spoiler = zipfile.ZipFile(SEEDS[-1])
+    [name] = [n for n in spoiler.namelist() if n.endswith("_Spoiler.txt")]
+    interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
+    with pytest.raises(UserError, match="pas les mêmes items") as error:
+        await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, spoiler.read(name)))
+    assert "\n- `Alice` · Total Strawberries : `20` dans le spoiler, `30` regénéré" in str(error.value)
+    assert not runtime.logic.active
 
 
 @requires_ap_server

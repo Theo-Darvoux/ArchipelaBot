@@ -15,11 +15,13 @@ from discord import ui
 from ..ap.webhost import WebhostError
 from ..core.apworlds import MAX_SIZE as MAX_APWORLD_SIZE
 from ..core.apworlds import Apworld, ApworldError, Attached, is_apworld_filename, read_apworld
+from ..core.room import SlotInfo
 from ..core.yamls import (
     MAX_SIZE,
     YamlError,
     YamlFile,
     assign_slots,
+    generation_order,
     is_yaml_filename,
     read_yaml,
     replaced_by,
@@ -342,13 +344,19 @@ class GameManager:
         ]
         return entries, files, attached
 
-    async def generation_files(self, thread_id: int) -> list[tuple[str, bytes]] | None:
-        """What generated the room tracked in this post, if it was started from a sign-up post."""
+    async def generation_files(self, thread_id: int, players: Sequence[SlotInfo]) -> list[tuple[str, bytes]] | None:
+        """What generated the room tracked in this post, if it was started from a sign-up post.
+
+        The yamls are prefixed so that Generate.py's filename sort numbers their players like the room's slots.
+        """
         game = await self.repo.started_in(thread_id)
         if game is None:
             return None
         entries, files, _ = await self.entries(game)
-        return entries if files else None
+        if not files:
+            return None
+        yamls = [(f"Players/{i:03d}_{f.filename}", f.content) for i, f in enumerate(generation_order(files, players))]
+        return yamls + [e for e in entries if not e[0].startswith("Players/")]
 
     async def bundle(self, game: GameRecord, limit: int) -> Bundle:
         """Everything to generate, split in zips that fit under `limit`."""

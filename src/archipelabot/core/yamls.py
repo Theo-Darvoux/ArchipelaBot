@@ -1,5 +1,5 @@
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
@@ -138,6 +138,26 @@ def replaced_by(files: Iterable[YamlFile], new: YamlFile) -> list[YamlFile]:
         elif overlap or old.filename == new.filename:
             replaced.append(old)
     return replaced
+
+
+def generation_order(files: Sequence[YamlFile], players: Iterable[SlotInfo]) -> list[YamlFile]:
+    """The files in the order that numbers their players like these slots, as Archipelago numbers them file by file.
+
+    The WebHost keeps the upload order, Generate.py sorts by filename: the room alone says which one was used.
+    """
+    sent = [(index, player) for index, f in enumerate(files) for player in f.players]
+    free = set(range(len(sent)))
+    first: dict[int, int] = {}
+    for slot in sorted(players, key=lambda s: s.slot):
+        for templated in (False, True):
+            match = next(
+                (k for k in sorted(free) if sent[k][1].templated == templated and sent[k][1].matches(slot)), None
+            )
+            if match is not None:
+                free.discard(match)
+                first.setdefault(sent[match][0], slot.slot)
+                break
+    return [f for _, f in sorted(enumerate(files), key=lambda e: (first.get(e[0], float("inf")), e[0]))]
 
 
 def assign_slots(files: Iterable[YamlFile], players: Iterable[SlotInfo]) -> dict[int, int]:

@@ -113,10 +113,20 @@ def check_room(generated: Generated, state: RoomState) -> None:
         raise LogicError("Ce spoiler n'est pas celui de cette room (la seed ne correspond pas).")
     players = {s.slot: (s.name, s.game) for s in state.players}
     if players and players != generated.slots:
+        differences = [
+            f"- slot {slot} : {_slot(players.get(slot))} dans la room, {_slot(generated.slots.get(slot))} regénéré"
+            for slot in sorted(players.keys() | generated.slots.keys())
+            if players.get(slot) != generated.slots.get(slot)
+        ]
+        more = f"\n- … et {len(differences) - 10} autres" if len(differences) > 10 else ""
         raise LogicError(
             "Les yamls du post ne donnent pas les mêmes joueurs que la room : il faut exactement les yamls (et "
-            "apworlds) utilisés pour générer."
+            "apworlds) utilisés pour générer.\n" + "\n".join(differences[:10]) + more
         )
+
+
+def _slot(player: tuple[str, str] | None) -> str:
+    return f"`{player[0]}` (*{player[1]}*)" if player else "*personne*"
 
 
 async def scout_world(address: str, password: str | None, slot_name: str) -> dict[int, tuple[int, int]]:

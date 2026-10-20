@@ -7,6 +7,7 @@ from archipelabot.core.yamls import (
     YamlFile,
     YamlSyntaxError,
     assign_slots,
+    generation_order,
     parse_players,
     read_yaml,
     replaced_by,
@@ -121,3 +122,18 @@ def test_slots_are_assigned_to_who_sent_the_yaml():
         SlotInfo(6, "Leo2", "Minecraft"),
     ]
     assert assign_slots(files, players) == {1: 1, 2: 2, 3: 2}
+
+
+def test_files_are_generated_in_the_order_of_the_room_slots():
+    a = yaml_file(1, "a.yaml", ("Zed", "Celeste"))
+    b = yaml_file(2, "b.yaml", ("Sha{number}", "Manual"), ("Sha{number}", "Manual"))
+    c = yaml_file(3, "C.yaml", ("Alice", "Terraria"))
+    broken = yaml_file(4, "d.yaml")
+    players = [
+        SlotInfo(4, "Zed", "Celeste"),
+        SlotInfo(1, "Alice", "Terraria"),
+        SlotInfo(2, "Sha1", "Manual"),
+        SlotInfo(3, "Sha2", "Manual"),
+    ]
+    assert generation_order([a, b, c, broken], players) == [c, b, a, broken]
+    assert generation_order([a, b, c], []) == [a, b, c]

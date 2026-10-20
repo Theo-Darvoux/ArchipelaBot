@@ -55,8 +55,12 @@ def test_the_regenerated_seed_must_be_the_room():
 
     with pytest.raises(LogicError, match="la seed ne correspond pas"):
         check_room(Generated("124", "0.6.8", "f", {1: ("Alice", "A"), 2: ("Bob", "B")}), state)
-    with pytest.raises(LogicError, match="mêmes joueurs"):
-        check_room(Generated("123", "0.6.8", "f", {1: ("Alice", "A"), 2: ("Bob", "C")}), state)
+    with pytest.raises(LogicError, match="mêmes joueurs") as error:
+        check_room(Generated("123", "0.6.8", "f", {1: ("Alice", "A"), 2: ("Bob", "C"), 3: ("Eve", "E")}), state)
+    assert str(error.value).endswith(
+        "\n- slot 2 : `Bob` (*B*) dans la room, `Bob` (*C*) regénéré"
+        "\n- slot 3 : *personne* dans la room, `Eve` (*E*) regénéré"
+    )
 
 
 def test_panel_shows_who_is_blocked():
@@ -168,8 +172,9 @@ async def test_apworlds_are_loaded():
 async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     record, thread = game
     bot.settings.archipelago_path = AP_DIR
-    for user, name in ((1, "p1.yaml"), (2, "p2.yaml"), (3, "p3.yaml")):
-        await bot.games.upload(record, user, [FakeAttachment(name, (DEV_DIR / "players" / name).read_bytes())])
+    # named out of slot order, like a WebHost upload: Archipelago would number them differently
+    for user, name, sent_as in ((1, "p1.yaml", "zoe.yaml"), (2, "p2.yaml", "Bob.yaml"), (3, "p3.yaml", "alan.yaml")):
+        await bot.games.upload(record, user, [FakeAttachment(sent_as, (DEV_DIR / "players" / name).read_bytes())])
     cog = bot.get_cog("track")
     host = FakeUser(id=77)
     interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)

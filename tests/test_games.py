@@ -522,7 +522,7 @@ async def test_apworlds_chosen_after_the_start(bot, game, ap_server):
     assert (attached.apworld.version, attached.user_id) == ("0.3.0", 2)
     assert "`hacknet` v0.3.0 · *Hacknet* · <@2>" in view_text(pick.response.sent[0]["view"])
     assert [o.default for o in parts_of(view)["Choisir l'apworld de Hacknet"].options] == [False, True]
-    assert (await bot.games.generation_files(thread.id))[-1] == (
+    assert (await bot.games.generation_files(thread.id, []))[-1] == (
         "custom_worlds/hacknet.apworld",
         apworld(version="0.3.0"),
     )

@@ -391,7 +391,7 @@ class RoomManager:
         settings = self.bot.settings
         if settings.archipelago_path is None or settings.logic_python is None:
             raise LogicError("Archipelago n'est pas installé avec ce bot : la logique n'est pas disponible.")
-        files = await self.bot.games.generation_files(runtime.record.thread_id or 0)
+        files = await self.bot.games.generation_files(runtime.record.thread_id or 0, runtime.tracker.state.players)
         if files is None:
             raise LogicError(
                 "Il faut les yamls de la partie : la logique ne marche que pour une room lancée depuis le post d'une "

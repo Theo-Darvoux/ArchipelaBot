@@ -152,11 +152,10 @@ def spoiler_differences(expected: str, regenerated: str, limit: int = 10) -> lis
         if (new := new_players.get(player)) is None:
             lines.append(f"- `{player}` : dans le spoiler, pas regénéré")
             continue
-        lines += [
-            f"- {who}{key} : `{options.get(key, '—')}` dans le spoiler, `{new.get(key, '—')}` regénéré"
-            for key in dict.fromkeys([*options, *new])
-            if options.get(key) != new.get(key)
-        ]
+        for key in dict.fromkeys([*options, *new]):
+            (label, value), (_, new_value) = options.get(key, (None, "—")), new.get(key, (None, "—"))
+            if value != new_value:
+                lines.append(f"- {who}{label or new[key][0]} : `{value}` dans le spoiler, `{new_value}` regénéré")
     lines += [f"- `{player}` : regénéré, pas dans le spoiler" for player in new_players if player not in players]
     if not lines and locations != new_locations:
         if not locations:
@@ -175,11 +174,15 @@ def spoiler_differences(expected: str, regenerated: str, limit: int = 10) -> lis
     )
 
 
-def _read_sections(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
-    """Options of the header ("") and of each player, then the locations, from a spoiler log."""
-    players: dict[str, dict[str, str]] = {}
+def _read_sections(text: str) -> tuple[dict[str, dict[str, tuple[str, str]]], list[str]]:
+    """Options (label, value) of the header ("") and of each player, then the locations, from a spoiler log.
+
+    Options are keyed without case, spaces or "_": a label can fall back to the option's name, "death_link" for
+    "Death Link", when an apworld changes a core option.
+    """
+    players: dict[str, dict[str, tuple[str, str]]] = {}
     locations: list[str] = []
-    current: dict[str, str] | None = None
+    current: dict[str, tuple[str, str]] | None = None
     in_locations = False
     for line in text.splitlines()[1:]:  # the first one is the version and seed, already checked
         if in_locations:
@@ -195,7 +198,8 @@ def _read_sections(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
             if current is None and not players:
                 current = players.setdefault("", {})
             if current is not None and (option := SPOILER_OPTION.match(line)):
-                current[option["key"]] = option["value"].strip()
+                label = option["key"].strip()
+                current[re.sub(r"[\s_]", "", label).casefold()] = (label, option["value"].strip())
     return players, locations
 
 

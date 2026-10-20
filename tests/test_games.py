@@ -487,6 +487,22 @@ async def test_apworlds_sent_outside_a_game(bot, game):
     assert "Utiliser hacknet v0.3.1" in parts_of(report)
 
 
+async def test_unused_apworlds_are_not_regenerated(bot, game):
+    record, thread = game
+    bot.games.core.games = frozenset({"Celeste"})
+    await bot.games.upload(record, 1, [FakeAttachment("a.yaml", yaml("A", "Hacknet"))])
+    await bot.games.upload(record, 1, [FakeAttachment("hacknet.apworld", apworld())])
+    await bot.games.upload(record, 2, [FakeAttachment("s.apworld", apworld("spire", "Slay the Spire"))])
+    await bot.games.repo.set_status(record, "started")
+    names = [name for name, _ in await bot.games.generation_files(thread.id, [])]
+    assert names == ["Players/000_a.yaml", "custom_worlds/hacknet.apworld"]
+    entries, _, _ = await bot.games.entries(record)
+    assert "custom_worlds/spire.apworld" in [name for name, _ in entries]  # still handed to whoever generates
+
+    await bot.games.upload(record, 3, [FakeAttachment("r.yaml", b"name: R\ngame:\n  Hacknet: 1\n  Celeste: 1\n")])
+    assert len(await bot.games.files(record)) == 1  # closed to players
+
+
 @requires_ap_server
 async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     record, thread = game

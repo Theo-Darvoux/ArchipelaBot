@@ -90,6 +90,8 @@ def dev_spoiler() -> str:
 def test_spoilers_tell_what_a_regeneration_got_wrong():
     spoiler = dev_spoiler()
     assert "Playthrough" not in spoiler and spoiler_differences(spoiler, spoiler) == []
+    # an old Manual apworld renames core options for every world: same options all the same
+    assert spoiler_differences(spoiler, spoiler.replace("Death Link:                      ", "death_link: ")) == []
 
     other = spoiler.replace("Player 2: Bob\nGame:                            A Short Hike", "Player 2: Bob\nGame: Hike")
     other = other.replace("Total Strawberries:              20", "Total Strawberries:              30")

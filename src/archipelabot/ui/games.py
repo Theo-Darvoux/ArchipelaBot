@@ -338,10 +338,17 @@ class GameManager:
             await self.repo.remove_yaml(yaml_id)
         await self.refresh(game)
 
-    async def entries(self, game: GameRecord) -> tuple[list[tuple[str, bytes]], list[YamlFile], list[Attached]]:
-        """Everything to generate, laid out like the Archipelago folder."""
+    async def entries(
+        self, game: GameRecord, *, used_only: bool = False
+    ) -> tuple[list[tuple[str, bytes]], list[YamlFile], list[Attached]]:
+        """Everything to generate, laid out like the Archipelago folder.
+
+        `used_only`: without the apworlds of games no yaml plays, some change the other worlds when loaded.
+        """
         files = await self.files(game)
         attached = await self.attached(game)
+        if used_only and None not in (games := {p.game for f in files for p in f.players}):
+            attached = [a for a in attached if a.apworld.game in games]
         contents = await self.apworlds.contents(a.apworld.id for a in attached if a.apworld.id is not None)
         entries = [
             (f"Players/{name}", f.content)
@@ -361,7 +368,7 @@ class GameManager:
         game = await self.repo.started_in(thread_id)
         if game is None:
             return None
-        entries, files, _ = await self.entries(game)
+        entries, files, _ = await self.entries(game, used_only=True)
         if not files:
             return None
         yamls = [(f"Players/{i:03d}_{f.filename}", f.content) for i, f in enumerate(generation_order(files, players))]

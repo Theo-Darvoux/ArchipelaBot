@@ -52,7 +52,9 @@ def numbers(recap: Recap, state: RoomState) -> str:
     lines = [f"{E.prog} {checks}", f"{E.hint} {plural(recap.hints, 'hint')}"]
     if recap.blocked is not None and recap.unfinished:
         blocked = len(recap.blocked)
-        lines.append(f"{E.blocked} {plural(blocked, 'bloqué', 'bloqués')}" if blocked else f"{E.reachable} aucun bloqué")
+        lines.append(
+            f"{E.blocked} {plural(blocked, 'bloqué', 'bloqués')}" if blocked else f"{E.reachable} aucun bloqué"
+        )
     if recap.deaths:
         line = f"{E.death} {plural(recap.deaths, 'mort')}"
         if recap.death_champion:

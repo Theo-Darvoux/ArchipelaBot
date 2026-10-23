@@ -97,6 +97,12 @@ def test_player_status_shows_what_the_logic_counts():
     text = view_text(player_status_view(2, state, progress, {}, inventory=inventory))
     assert text.endswith(
         "**Items de progression comptés par la logique**\n- **Firebrand** : au départ\n"
-        "- **Hammers** ×2 : Block 1 (Alice), Pipe\\_Room (Carol)"
+        "- **Hammers** x2 : Block 1 (Alice), Pipe\\_Room (Carol)"
     )
     assert "comptés" not in view_text(player_status_view(2, state, progress, {}, inventory=[]))
+
+    many = [(f"Item {i:02d}", "Location " + "x" * 60 + f" ({i})") for i in range(40)] + [("Item 39", "")]
+    text = view_text(player_status_view(2, state, progress, {}, inventory=many))
+    listed = text.split("comptés par la logique**\n")[1].splitlines()
+    assert listed[0].startswith("- **Item 00** : ") and len("\n".join(listed[:-1])) <= 1500
+    assert listed[-1].startswith("-# Aussi : Item ") and listed[-1].endswith(", Item 38, Item 39 x2")

@@ -27,8 +27,8 @@ def apworld(module: str = "hacknet", game: str | None = "Hacknet", version: str 
 def test_reads_the_manifest():
     world = read_apworld(apworld(), 7)
     assert (world.game, world.module, world.version, world.uploaded_by) == ("Hacknet", "hacknet", "0.3.1", 7)
-    assert world.filename == "hacknet.apworld" and world.label == "hacknet v0.3.1"
-    assert read_apworld(apworld(version=None), 7).label == "hacknet"
+    assert world.filename == "hacknet.apworld" and world.label == "Hacknet v0.3.1"
+    assert read_apworld(apworld(version=None), 7).label == "Hacknet"
 
 
 def test_old_apworlds_without_manifest():

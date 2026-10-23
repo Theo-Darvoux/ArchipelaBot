@@ -375,7 +375,7 @@ async def test_custom_games_need_their_apworld(bot, game):
     await cog.on_message(message)
     assert message.reactions == ["✅"]
     panel = view_text(thread.messages[0].view)
-    assert "`hacknet` v0.3.1 · *Hacknet* · <@1>" in panel and "manquant" not in panel
+    assert "*Hacknet* v0.3.1 · <@1>" in panel and "manquant" not in panel
 
     interaction = click(bot, user=5)
     await YamlsZipButton(record.id).callback(interaction)
@@ -391,7 +391,7 @@ async def test_apworlds_sent_before_are_offered_again(bot, game):
     record, thread = game
     bot.games.core.games = frozenset({"Celeste"})
     await bot.games.upload(record, 1, [FakeAttachment("hacknet.apworld", apworld(version="0.3.0"))])
-    assert "`hacknet` v0.3.0 · *Hacknet* · <@1>" in view_text(thread.messages[0].view)
+    assert "*Hacknet* v0.3.0 · <@1>" in view_text(thread.messages[0].view)
     await bot.games.cancel(record)
 
     await new_game(bot, thread.parent.guild, nom="Dimanche")
@@ -403,12 +403,14 @@ async def test_apworlds_sent_before_are_offered_again(bot, game):
     submit = click(bot, user=2)
     await modal.on_submit(submit)
     report = submit.followup.sent[0]["view"]
-    assert "Reprends celui déjà envoyé sur le serveur" in view_text(report)
+    text = view_text(report)
+    assert "Le serveur en a déjà un : utilise-le, ou envoie le tien." in text
+    assert "*Hacknet* v0.3.0\n-# Envoyé sur le serveur par <@1> le " in text
     pick = click(bot, user=2)
-    await parts_of(report)["Utiliser hacknet v0.3.0"].callback(pick)
-    assert "Apworld choisi : `hacknet` v0.3.0" in view_text(pick.response.sent[0]["view"])
+    await parts_of(report)["Utiliser"].callback(pick)
+    assert "Apworld choisi : *Hacknet* v0.3.0" in view_text(pick.response.sent[0]["view"])
     assert not parts_of(report)
-    assert "`hacknet` v0.3.0 · *Hacknet* · <@2>" in view_text(sunday_thread.messages[0].view)
+    assert "*Hacknet* v0.3.0 · <@2>" in view_text(sunday_thread.messages[0].view)
 
     await bot.games.upload(sunday, 3, [FakeAttachment("hacknet.apworld", apworld())])
     interaction = click(bot, user=2)
@@ -425,7 +427,7 @@ async def test_apworlds_sent_before_are_offered_again(bot, game):
     await YamlButton(sunday.id).callback(interaction)
     mine = interaction.response.sent[0]["view"]
     select = parts_of(mine)["Choisir un apworld de Hacknet"]
-    assert [o.label for o in select.options] == ["hacknet v0.3.1", "hacknet v0.3.0"]
+    assert [o.label for o in select.options] == ["Hacknet v0.3.1", "Hacknet v0.3.0"]
     select._values = [select.options[1].value]
     await select.callback(click(bot, user=2))
     [attached] = await bot.games.attached(sunday)
@@ -475,7 +477,7 @@ async def test_apworlds_sent_outside_a_game(bot, game):
     cog = bot.get_cog("apworld")
     interaction = FakeInteraction(user=FakeUser(id=3))
     await cog.send.callback(cog, interaction, fichier=FakeAttachment("Hacknet_1.apworld", apworld()))
-    assert "`hacknet` v0.3.1 · *Hacknet* est sur le serveur" in view_text(interaction.followup.sent[0]["view"])
+    assert "*Hacknet* v0.3.1 est sur le serveur" in view_text(interaction.followup.sent[0]["view"])
     assert [a.uploaded_by for a in await bot.games.apworlds.library(1, ["Hacknet"])] == [3]
     assert await bot.games.attached(record) == []
 
@@ -484,7 +486,7 @@ async def test_apworlds_sent_outside_a_game(bot, game):
 
     await bot.games.upload(record, 1, [FakeAttachment("a.yaml", yaml("A", "Hacknet"))])
     report = await UploadReport.create(bot.games, record, 1, [])
-    assert "Utiliser hacknet v0.3.1" in parts_of(report)
+    assert "Utiliser" in parts_of(report) and "Envoyé sur le serveur par <@3>" in view_text(report)
 
 
 async def test_unused_apworlds_are_not_regenerated(bot, game):
@@ -575,14 +577,14 @@ async def test_apworlds_chosen_after_the_start(bot, game, ap_server):
     await track.apworlds.callback(track, interaction)
     view = interaction.response.sent[0]["view"]
     select = parts_of(view)["Choisir l'apworld de Hacknet"]
-    assert [o.label for o in select.options] == ["hacknet v0.3.1", "hacknet v0.3.0"]
+    assert [o.label for o in select.options] == ["Hacknet v0.3.1", "Hacknet v0.3.0"]
     assert not any(o.default for o in select.options)
     select._values = [select.options[1].value]
     pick = click(bot)
     await select.callback(pick)
     [attached] = await bot.games.attached(record)
     assert (attached.apworld.version, attached.user_id) == ("0.3.0", 2)
-    assert "`hacknet` v0.3.0 · *Hacknet* · <@2>" in view_text(pick.response.sent[0]["view"])
+    assert "*Hacknet* v0.3.0 · <@2>" in view_text(pick.response.sent[0]["view"])
     assert [o.default for o in parts_of(view)["Choisir l'apworld de Hacknet"].options] == [False, True]
     assert (await bot.games.generation_files(thread.id, []))[-1] == (
         "custom_worlds/hacknet.apworld",

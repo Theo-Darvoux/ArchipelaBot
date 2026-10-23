@@ -36,7 +36,7 @@ class Apworld:
 
     @property
     def label(self) -> str:
-        return f"{self.module} v{self.version}" if self.version else self.module
+        return f"{self.game} v{self.version}" if self.version else self.game
 
 
 @dataclass(frozen=True, slots=True)

@@ -27,18 +27,25 @@ def game_label(player: PlayerYaml) -> str:
 
 def apworld_label(apworld: Apworld) -> str:
     version = f" v{md(apworld.version)}" if apworld.version else ""
-    return f"{code(apworld.module)}{version} · *{md(apworld.game)}*"
+    return f"*{md(apworld.game)}*{version}"
 
 
-def missing_text(game: str, in_library: bool, stray: Sequence[Apworld] = ()) -> str:
+def missing_text(game: str, library: Sequence[Apworld], stray: Sequence[Apworld] = ()) -> str:
     text = f"{E.apworld} *{md(game)}* n'est pas un jeu officiel : il faut son `.apworld`."
     if stray:
         games = ", ".join(sorted({f"*{md(a.game)}*" for a in stray}))
         sent = "Celui envoyé est pour" if len(stray) == 1 else "Ceux envoyés sont pour"
         text += f" {sent} {games}, pas pour ce jeu."
-    if in_library:
-        return text + " Reprends celui déjà envoyé sur le serveur, ou envoie le tien."
+    if len(library) == 1:
+        return text + " Le serveur en a déjà un : utilise-le, ou envoie le tien."
+    if library:
+        return text + f" Le serveur en a déjà {len(library)} : choisis-en un, ou envoie le tien."
     return text + f" Envoie-le avec {E.yaml} **Mon yaml** ou dépose-le dans le post."
+
+
+def library_text(apworld: Apworld) -> str:
+    sent = f" le {apworld.uploaded_at:%d/%m/%Y}" if apworld.uploaded_at else ""
+    return f"{E.apworld} {apworld_label(apworld)}\n-# Envoyé sur le serveur par <@{apworld.uploaded_by}>{sent}"
 
 
 def apworlds_section(apworlds: Sequence[Attached], missing: Sequence[str]) -> str:
@@ -132,7 +139,7 @@ def upload_text(upload: Upload) -> str:
     if upload.apworld:
         text = f"{E.apworld} **{md(upload.filename)}** : apworld {apworld_label(upload.apworld)}"
         if upload.replaced:
-            text += "\n-# Remplace " + ", ".join(f"{code(label)}" for label in upload.replaced)
+            text += "\n-# Remplace " + ", ".join(md(label) for label in upload.replaced)
         return text
     if upload.invalid:
         text = f"{E.yaml} **{md(upload.filename)}** : ⚠️ {upload.invalid}\n-# {INVALID_KEPT}"

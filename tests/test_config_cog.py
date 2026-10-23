@@ -151,9 +151,9 @@ async def test_apworld_channel_is_imported_then_followed(bot):
     assert (await bot.guild_configs.get(1)).apworld_channel_id == 8
     library = await bot.games.apworlds.library(1, ["Hacknet", "Slay the Spire"])
     assert [(a.label, a.uploaded_by, a.uploaded_at.day) for a in library] == [
-        ("hacknet v0.3.1", 4, 18),
-        ("spire v0.3.1", 2, 17),
-        ("hacknet v0.3.0", 1, 16),
+        ("Hacknet v0.3.1", 4, 18),
+        ("Slay the Spire v0.3.1", 2, 17),
+        ("Hacknet v0.3.0", 1, 16),
     ]
 
     listener = bot.get_cog("apworld")

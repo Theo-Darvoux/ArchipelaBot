@@ -78,13 +78,16 @@ def _counted(inventory: Sequence[tuple[str, str]]) -> str:
     sources: dict[str, list[str]] = {}
     for item, source in inventory:
         sources.setdefault(item, []).append(source or "au départ")
-    lines = []
+    lines: list[str] = []
+    rest: list[str] = []
     for item in sorted(sources, key=str.casefold):
         found = sources[item]
-        count = f" ×{len(found)}" if len(found) > 1 else ""
+        count = f" x{len(found)}" if len(found) > 1 else ""
         line = f"- **{md(item)}**{count} : {md(', '.join(found))}"
-        if sum(len(line) + 1 for line in lines) + len(line) > IN_LOGIC_BUDGET:
-            lines.append(f"-# … et {plural(len(sources) - len(lines), 'autre')}")
-            break
-        lines.append(line)
+        if rest or sum(len(line) + 1 for line in lines) + len(line) > IN_LOGIC_BUDGET:
+            rest.append(f"{md(item)}{count}")
+        else:
+            lines.append(line)
+    if rest:
+        lines.append(f"-# Aussi : {', '.join(rest)}")
     return "\n".join(lines)

@@ -18,6 +18,7 @@ from .render.signup import (
     Upload,
     apworld_label,
     game_label,
+    library_text,
     missing_text,
     player_label,
     upload_text,
@@ -45,13 +46,11 @@ def apworld_prompts(
     """For each game still without its apworld: what to do, and the ones this server already has to pick from."""
     items: list[ui.Item] = []
     for name, library in list(missing.items())[:MAX_PROMPTS]:
-        items.append(ui.TextDisplay(missing_text(name, bool(library), stray)))
+        items.append(ui.TextDisplay(missing_text(name, library, stray)))
         if len(library) == 1:
-            button = ui.Button(
-                label=f"Utiliser {library[0].label}"[:80], emoji=E.partial("apworld"), style=discord.ButtonStyle.primary
-            )
+            button = ui.Button(label="Utiliser", emoji=E.partial("apworld"), style=discord.ButtonStyle.primary)
             button.callback = _pick(games, game, library[0].id or 0, on_pick)
-            items.append(ui.ActionRow(button))
+            items.append(ui.Section(ui.TextDisplay(library_text(library[0])), accessory=button))
         elif library:
             select = ui.Select(
                 placeholder=f"Choisir un apworld de {name}"[:150],

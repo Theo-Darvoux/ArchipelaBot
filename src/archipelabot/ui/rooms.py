@@ -269,6 +269,7 @@ class RoomRuntime:
             self.progress,
             await self.history.events(self.record.id),
             await self.history.snapshots(self.record.id),
+            self.logic.results if self.active else None,
         )
 
     async def on_event(self, event: ev.Event) -> None:

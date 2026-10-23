@@ -2,6 +2,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from ..core.logic import SlotLogic
 from ..core.progress import Progress
 from ..core.room import RoomState
 from ..storage.history import LoggedEvent, Snapshot
@@ -36,6 +37,7 @@ class Recap:
     releases: int
     collects: int
     series: list[Series] = field(default_factory=list)
+    blocked: frozenset[int] | None = None  # None: logic unknown
 
     @property
     def everyone_finished(self) -> bool:
@@ -50,6 +52,7 @@ def build_recap(
     progress: Progress,
     events: list[LoggedEvent],
     snapshots: list[Snapshot],
+    logic: dict[int, SlotLogic] | None = None,
 ) -> Recap:
     players = [s.slot for s in state.players]
     ranking = progress.ranking()
@@ -75,6 +78,7 @@ def build_recap(
         releases=kinds["release"],
         collects=kinds["collect"],
         series=build_series(players, progress, snapshots, ended),
+        blocked=frozenset(slot for slot, _ in unfinished if slot in logic and logic[slot].blocked) if logic else None,
     )
 
 

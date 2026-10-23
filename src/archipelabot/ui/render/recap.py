@@ -35,7 +35,10 @@ def podium(recap: Recap, state: RoomState) -> str:
         lines.append(f"{place} **{md(state.name(finisher.slot))}** · *{md(state.game(finisher.slot))}* · {when}")
     for slot, ratio in recap.unfinished:
         percent = "?" if ratio is None else f"{int(ratio * 100)}"
-        lines.append(f"{E.ring(ratio)} {md(state.name(slot))} · *{md(state.game(slot))}* · {percent} %")
+        line = f"{E.ring(ratio)} {md(state.name(slot))} · *{md(state.game(slot))}* · {percent} %"
+        if recap.blocked and slot in recap.blocked:
+            line += f" · {E.blocked} **bloqué**"
+        lines.append(line)
     return fit_lines(lines, PODIUM_BUDGET, lambda hidden: f"-# … et {plural(hidden, 'autre joueur', 'autres joueurs')}")
 
 
@@ -47,6 +50,9 @@ def numbers(recap: Recap, state: RoomState) -> str:
         else (plural(recap.checks_done, "check"))
     )
     lines = [f"{E.prog} {checks}", f"{E.hint} {plural(recap.hints, 'hint')}"]
+    if recap.blocked is not None and recap.unfinished:
+        blocked = len(recap.blocked)
+        lines.append(f"{E.blocked} {plural(blocked, 'bloqué', 'bloqués')}" if blocked else f"{E.reachable} aucun bloqué")
     if recap.deaths:
         line = f"{E.death} {plural(recap.deaths, 'mort')}"
         if recap.death_champion:

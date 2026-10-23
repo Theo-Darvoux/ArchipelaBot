@@ -8,6 +8,7 @@ import pytest
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
 from archipelabot.core import events as ev
+from archipelabot.core.logic import SlotLogic
 from archipelabot.core.progress import Baseline, Progress
 from archipelabot.core.room import RoomState, SlotInfo
 from archipelabot.errors import UserError
@@ -77,6 +78,22 @@ def test_recap_view_and_chart():
 
     png = render_chart(recap, state.name, ZoneInfo("Europe/Paris"))
     assert png.startswith(b"\x89PNG") and len(png) > 10_000
+    assert "🔒" not in text and "aucun bloqué" not in text
+
+
+def test_recap_during_the_game_shows_who_is_blocked():
+    state, progress, events, snapshots = make_game()
+    logic = {1: SlotLogic(frozenset(), False), 2: SlotLogic(frozenset(), False), 3: SlotLogic(frozenset({4}), False)}
+    recap = build_recap("Async", T0, T0 + timedelta(hours=4), state, progress, events, snapshots, logic)
+    assert recap.blocked == {2}  # Alice reached her goal
+    text = view_text(recap_view(recap, state, chart=False))
+    assert "◑ Bob · *SM* · 50 % · 🔒 **bloqué**" in text and "Carol · *ALttP* · 20 %\n" in text
+    assert "🔒 1 bloqué" in text
+
+    logic[2] = SlotLogic(frozenset(), True)
+    recap = build_recap("Async", T0, T0 + timedelta(hours=4), state, progress, events, snapshots, logic)
+    text = view_text(recap_view(recap, state, chart=False))
+    assert "🔓 aucun bloqué" in text and "🔒" not in text
 
 
 CLIENTS = {"Alice": "Celeste 64", "Bob": "A Short Hike", "Carol": "ChecksFinder"}

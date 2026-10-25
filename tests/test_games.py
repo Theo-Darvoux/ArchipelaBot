@@ -8,9 +8,14 @@ import discord
 import pytest
 
 from archipelabot.core import events as ev
+from archipelabot.core.apworlds import Apworld, Attached
+from archipelabot.core.yamls import PlayerYaml, YamlFile
 from archipelabot.errors import UserError
+from archipelabot.storage.games import GameRecord
 from archipelabot.storage.guilds import GuildConfig
+from archipelabot.ui.emojis import FALLBACKS, E, uploaded_name
 from archipelabot.ui.games import ZIP_OVERHEAD, GameManager
+from archipelabot.ui.render.signup import signup_view
 from archipelabot.ui.signup_buttons import MyYamlsView, UploadReport, YamlButton, YamlModal, YamlsZipButton
 
 from .ap_server import DEV_DIR, requires_ap_server
@@ -113,6 +118,26 @@ async def test_yamls_fill_the_panel(bot, game):
     assert new.replaced == ["psders.yaml"]
     assert "**Psders1** · *Hollow Knight*" in view_text(thread.messages[0].view)
     assert len(await bot.games.files(record)) == 2
+
+
+def test_a_full_panel_fits_in_one_message():
+    user = 10**18
+    game = GameRecord(guild_id=1, name="HolidAP", description="Prenez vos gros jeux", created_by=user, id=1)
+    games = [f"Some Long Custom Game Name {i}" for i in range(12)]
+    apworlds = [Attached(Apworld(name, "m", "1.0.0", "", user), user) for name in games]
+
+    def panel(players: int) -> str:
+        files = [YamlFile(user, f"{i}.yaml", b"", [PlayerYaml(f"Player{i:02}", games[i % 12])]) for i in range(players)]
+        return view_text(signup_view(game, files, apworlds=apworlds, track_command=f"</track start:{user}>"))
+
+    # Uploaded icons are long custom emoji tags: render with those.
+    E.use({name: discord.PartialEmoji(name=uploaded_name(name), id=user) for name in FALLBACKS})
+    try:
+        everyone, crowd = panel(30), panel(80)
+    finally:
+        E.reset()
+    assert len(everyone) <= 4000 and "Player29" in everyone and "- **Player00**" in everyone
+    assert len(crowd) <= 4000 and "… et 48 autres" in crowd
 
 
 async def test_my_yaml_button_opens_the_upload_then_lists_mine(bot, game):

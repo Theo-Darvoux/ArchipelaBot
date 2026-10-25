@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import discord
@@ -11,7 +11,9 @@ from ..components import Tone
 from ..emojis import E
 from .text import code, fit_lines, md, plural
 
-ROSTER_BUDGET = 3000
+# A message's text displays share 4000 characters: the roster gets what the other sections leave.
+TEXT_LIMIT = 4000
+APWORLDS_BUDGET = 1200
 INVALID_KEPT = "Il est gardé quand même, mais la génération échouera tant qu'il n'est pas corrigé."
 
 
@@ -48,23 +50,38 @@ def library_text(apworld: Apworld) -> str:
     return f"{E.apworld} {apworld_label(apworld)}\n-# Envoyé sur le serveur par <@{apworld.uploaded_by}>{sent}"
 
 
+def bulleted(lines: Callable[[str], list[str]], icon: str, budget: int) -> list[str]:
+    """`lines(icon)`, or with plain dashes when the icons don't fit in `budget`."""
+    full = lines(icon)
+    return full if sum(len(line) + 1 for line in full) <= budget else lines("-")
+
+
 def apworlds_section(apworlds: Sequence[Attached], missing: Sequence[str]) -> str:
-    lines = [f"{E.apworld} {apworld_label(a.apworld)} · <@{a.user_id}>" for a in apworlds]
-    lines += [f"⚠️ *{md(game)}* · apworld manquant" for game in missing]
-    return f"### {E.apworld} Apworlds\n" + "\n".join(lines)
+    def lines(bullet: str) -> list[str]:
+        return [f"{bullet} {apworld_label(a.apworld)} · <@{a.user_id}>" for a in apworlds] + [
+            f"⚠️ *{md(game)}* · apworld manquant" for game in missing
+        ]
+
+    return f"### {E.apworld} Apworlds\n" + fit_lines(
+        bulleted(lines, E.apworld, APWORLDS_BUDGET), APWORLDS_BUDGET, lambda hidden: f"… et {hidden} autres"
+    )
 
 
-def signup_roster(files: Sequence[YamlFile]) -> str:
-    lines = [
-        line
-        for f in files
-        for line in (
-            [f"⚠️ {code(f.filename)} · *yaml invalide* · <@{f.user_id}>"]
-            if f.invalid
-            else [f"{E.yaml} {player_label(p)} · {game_label(p)} · <@{f.user_id}>" for p in f.players]
-        )
-    ]
-    return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres") or "*Personne pour l'instant.*"
+def signup_roster(files: Sequence[YamlFile], budget: int) -> str:
+    def lines(bullet: str) -> list[str]:
+        return [
+            line
+            for f in files
+            for line in (
+                [f"⚠️ {code(f.filename)} · *yaml invalide* · <@{f.user_id}>"]
+                if f.invalid
+                else [f"{bullet} {player_label(p)} · {game_label(p)} · <@{f.user_id}>" for p in f.players]
+            )
+        ]
+
+    return fit_lines(bulleted(lines, E.yaml, budget), budget, lambda hidden: f"… et {hidden} autres") or (
+        "*Personne pour l'instant.*"
+    )
 
 
 def signup_view(
@@ -88,11 +105,6 @@ def signup_view(
     if cancelled:
         header += f"\n### {E.stopped} Partie annulée"
 
-    slots = sum(len(f.players) for f in files)
-    people = len({f.user_id for f in files})
-    count = plural(people, "joueur") + (f" · {plural(slots, 'slot')}" if slots != people else "")
-    roster = f"### {E.signup} Inscrits" + (f" · {count}" if files else "") + f"\n{signup_roster(files)}"
-
     steps = (
         "### Comment participer\n"
         f"**1.** Clique sur le bouton **{E.yaml} Mon yaml** pour **envoyer**, **modifier**, ou **retirer** ton "
@@ -103,13 +115,20 @@ def signup_view(
         f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "
         "partie et chacun est relié à son slot."
     )
+    apworlds_text = apworlds_section(apworlds, missing) if apworlds or missing else ""
+
+    slots = sum(len(f.players) for f in files)
+    people = len({f.user_id for f in files})
+    count = plural(people, "joueur") + (f" · {plural(slots, 'slot')}" if slots != people else "")
+    title = f"### {E.signup} Inscrits" + (f" · {count}" if files else "") + "\n"
+    budget = TEXT_LIMIT - len(header) - len(title) - len(apworlds_text) - (0 if cancelled else len(steps))
     view = ui.LayoutView(timeout=None)
     view.add_item(
         ui.Container(
             ui.TextDisplay(header),
             ui.Separator(),
-            ui.TextDisplay(roster),
-            *([ui.Separator(), ui.TextDisplay(apworlds_section(apworlds, missing))] if apworlds or missing else []),
+            ui.TextDisplay(title + signup_roster(files, budget)),
+            *([ui.Separator(), ui.TextDisplay(apworlds_text)] if apworlds_text else []),
             *([] if cancelled else [ui.Separator(), ui.TextDisplay(steps)]),
             *([ui.Separator(), ui.ActionRow(*buttons)] if buttons and not cancelled else []),
             accent_colour=discord.Colour.dark_grey() if cancelled else Tone.INFO.value,

@@ -1,7 +1,7 @@
 """Run by Archipelago's own Python, never imported by the bot: regenerates a seed, then answers logic questions.
 
-Protocol, one JSON object per line. First line in: {"archipelago", "workdir", "seed", "plando"}; first line out:
-{"ready": {...}} or {"error": "..."}. Then for each request in, one answer out.
+Protocol, one JSON object per line. First line in: {"archipelago", "workdir", "seed", "plando", "output"}; first line
+out: {"ready": {...}} or {"error": "..."}. Then for each request in, one answer out.
 """
 
 import hashlib
@@ -68,7 +68,7 @@ def generate(job: dict):
             "--outputpath", os.path.join(job["workdir"], "output"),
             "--seed", str(job["seed"]),
             "--plando", job["plando"],
-            "--skip_output",
+            *(["--spoiler", "1"] if job.get("output") else ["--skip_output"]),
         ]
     )  # fmt: skip
     erargs, seed = Generate.main(args)

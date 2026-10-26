@@ -53,6 +53,8 @@ FALLBACKS: dict[str, str] = {
     "calendar": "📅",
     "blocked": "🔒",
     "reachable": "🔓",
+    "patch": "🎮",
+    "host": "🖥️",
 }
 
 

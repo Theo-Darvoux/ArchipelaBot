@@ -7,6 +7,8 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
+    ports:
+      - "38281-38300:38281-38300"  # games hosted by the bot (/partie lancer): same range as HOST_PORTS
     logging:
       driver: json-file
       options:

@@ -18,9 +18,10 @@ from .storage.guilds import GuildRepo
 from .ui.components import Tone, notice
 from .ui.emojis import ensure_uploaded
 from .ui.games import GameManager
-from .ui.panel_buttons import ClaimButton, MyHintsButton, SettingsButton
+from .ui.hosting import HostManager
+from .ui.panel_buttons import ClaimButton, MyHintsButton, PatchButton, SettingsButton
 from .ui.rooms import RoomManager
-from .ui.signup_buttons import YamlButton, YamlsZipButton
+from .ui.signup_buttons import CheckButton, YamlButton, YamlsZipButton
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class ArchipelaBot(commands.Bot):
         self.datapackages = DataPackageStore(settings.database_path.parent / "datapackage")
         self.rooms = RoomManager(self)
         self.games = GameManager(self)
+        self.hosting = HostManager(self)
         self.http_session: aiohttp.ClientSession | None = None
         self.command_ids: dict[str, int] = {}
         self._backups: asyncio.Task[None] | None = None
@@ -97,7 +99,9 @@ class ArchipelaBot(commands.Bot):
             await ensure_uploaded(self)
         except discord.HTTPException:
             log.warning("Could not upload the bot's icons; falling back to Unicode emojis", exc_info=True)
-        self.add_dynamic_items(ClaimButton, MyHintsButton, SettingsButton, YamlButton, YamlsZipButton)
+        self.add_dynamic_items(
+            ClaimButton, MyHintsButton, PatchButton, SettingsButton, YamlButton, YamlsZipButton, CheckButton
+        )
         await self.load_extensions()
         await self.sync_commands()
         await self.rooms.restore()
@@ -108,6 +112,7 @@ class ArchipelaBot(commands.Bot):
         if self._backups:
             self._backups.cancel()
         await self.rooms.shutdown()
+        await self.hosting.shutdown()
         if self.http_session:
             await self.http_session.close()
         await super().close()

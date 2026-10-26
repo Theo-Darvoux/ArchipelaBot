@@ -107,7 +107,7 @@ class GameApworldsView(ui.LayoutView):
 
 
 class GameYamlsView(ui.LayoutView):
-    """After the start: a manager fixes the post's yamls, so that they regenerate the room."""
+    """A manager fixes the post's yamls, whoever sent them: before the start, or after it to regenerate the room."""
 
     def __init__(self, games: "GameManager", game: GameRecord, files: Sequence[YamlFile]) -> None:
         super().__init__(timeout=900)
@@ -149,12 +149,14 @@ class GameYamlsView(ui.LayoutView):
         send = ui.Button(label="Envoyer des yamls", emoji=E.partial("yaml"), style=discord.ButtonStyle.primary)
         send.callback = self._send
         container.add_item(ui.ActionRow(send))
-        container.add_item(
-            ui.TextDisplay(
+        if self.games.get(self.game.id or 0) is not None:
+            footer = "-# Un yaml envoyé ici remplace celui du même slot, quelle que soit la personne qui l'a envoyé."
+        else:
+            footer = (
                 "-# Un yaml envoyé ici ou dans ce fil remplace celui du même slot. Ensuite, renvoie le spoiler avec "
                 f"{self.games.bot.command_mention('track logique')}."
             )
-        )
+        container.add_item(ui.TextDisplay(footer))
         self.add_item(container)
 
     def _removed(self, select: ui.Select):

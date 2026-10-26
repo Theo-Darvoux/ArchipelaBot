@@ -153,6 +153,12 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE room ADD COLUMN logic_from_room INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    ALTER TABLE room ADD COLUMN host_folder TEXT;      -- hosted by the bot: in its hosted/ folder
+    ALTER TABLE room ADD COLUMN host_port INTEGER;
+    ALTER TABLE room ADD COLUMN host_version TEXT;
+    ALTER TABLE room ADD COLUMN host_options TEXT;
+    """,
 ]
 
 

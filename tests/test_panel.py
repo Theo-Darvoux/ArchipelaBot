@@ -62,6 +62,19 @@ def test_huge_rooms_fit_in_one_message():
     assert text.endswith("autres · `/status joueur:` pour le détail")
 
 
+def test_big_rooms_drop_presence_and_claims_before_games():
+    state, progress = make_room(players=50)
+    slots = range(1, 51)
+    progress.apply_baseline(
+        Baseline({s: {1} for s in slots}, {s: 10 for s in slots}, {s: T0 - timedelta(hours=s) for s in slots})
+    )
+    claims = {s: 10**17 + s for s in slots}
+    logic = {s: SlotLogic(frozenset({2, 3}), False) for s in slots}
+    text = roster(state, progress, claims, logic)
+    assert len(text) <= ROSTER_BUDGET and "autres" not in text
+    assert text.splitlines()[0] == "◔ **10 %** · Alice · *Super Metroid* · 🔓 2 checks en logique"
+
+
 def test_player_status_view():
     state, progress = make_room()
     progress.apply_baseline(Baseline({2: {1, 2}}, {2: 8}))

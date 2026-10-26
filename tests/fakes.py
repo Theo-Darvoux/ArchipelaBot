@@ -193,6 +193,12 @@ def view_text(view: discord.ui.LayoutView) -> str:
     return "\n".join(item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay))
 
 
+def button_labels(view: discord.ui.LayoutView) -> list[str]:
+    """Labels of the view's buttons, persistent ones (DynamicItem) included."""
+    items = (getattr(item, "item", item) for item in view.walk_children())
+    return [item.label for item in items if isinstance(item, discord.ui.Button)]
+
+
 class _NoTyping(contextlib.AbstractAsyncContextManager):
     async def __aexit__(self, *_exc) -> None:
         return None

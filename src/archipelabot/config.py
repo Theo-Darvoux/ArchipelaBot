@@ -15,3 +15,6 @@ class Settings(BaseSettings):
     # an Archipelago source folder, or a folder of them for several versions, to compute who is blocked
     archipelago_path: Path | None = None
     archipelago_python: Path | None = None  # for a single folder without its .venv
+    # the address players use to reach the bot's machine: games hosted by the bot are only possible with it
+    host_address: str | None = None
+    host_ports: str = "38281-38300"

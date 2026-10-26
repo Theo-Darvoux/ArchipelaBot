@@ -15,9 +15,12 @@ from discord import ui
 from ..ap.webhost import WebhostError
 from ..core.apworlds import MAX_SIZE as MAX_APWORLD_SIZE
 from ..core.apworlds import Apworld, ApworldError, Attached, is_apworld_filename, read_apworld
+from ..core.compat import Problem, check_options, version_conflicts
+from ..core.logic import DEFAULT_PLANDO, find_installs, pick_install
 from ..core.room import SlotInfo
 from ..core.yamls import (
     MAX_SIZE,
+    PlayerYaml,
     YamlError,
     YamlFile,
     assign_slots,
@@ -33,9 +36,9 @@ from ..storage.apworlds import ApworldRepo
 from ..storage.games import GameRecord, GameRepo
 from ..storage.guilds import GuildConfig
 from .forum import RoomTag, ensure_room_tags
-from .render.signup import Upload, signup_view
+from .render.signup import Upload, conflict_text, signup_view
 from .rooms import RoomRuntime, ThreadSink
-from .signup_buttons import YamlButton, YamlsZipButton
+from .signup_buttons import CheckButton, YamlButton, YamlsZipButton
 
 if TYPE_CHECKING:
     from ..bot import ArchipelaBot
@@ -144,18 +147,39 @@ class GameManager:
             if (name not in core if core is not None else name in known)
         }
 
+    async def conflicts(
+        self, game: GameRecord, players: Iterable[PlayerYaml], attached: Sequence[Attached] | None = None
+    ) -> list[str]:
+        """Versions of the game's apworlds these players' yamls don't accept, as their manifests and yamls say."""
+        attached = await self.attached(game) if attached is None else attached
+        return [conflict_text(*c) for c in version_conflicts(players, {a.apworld.game: a.apworld for a in attached})]
+
+    async def check(self, game: GameRecord) -> tuple[str, list[Problem]]:
+        """Every option of the yamls against the apworlds, in Archipelago: runs the apworlds' code.
+
+        Returns the version of Archipelago used. Raises LogicError when it can't run."""
+        settings = self.bot.settings
+        installs = await asyncio.to_thread(find_installs, settings.archipelago_path, settings.archipelago_python)
+        install = pick_install(installs, "")
+        entries, _, _ = await self.entries(game, used_only=True)
+        return install.version, await check_options(install.python, install.path, entries, DEFAULT_PLANDO)
+
     async def render(self, game: GameRecord, files: Sequence[YamlFile] | None = None) -> ui.LayoutView:
         assert game.id is not None
         files = await self.files(game) if files is None else files
         attached = await self.attached(game)
         config = await self.bot.guild_configs.get(game.guild_id)
         buttons: list[ui.Item] = [YamlButton(game.id), YamlsZipButton(game.id)]
+        if self.bot.settings.archipelago_path:
+            buttons.append(CheckButton(game.id))
         return signup_view(
             game,
             files,
             apworlds=attached,
             missing=list(await self.missing(game, files, attached)),
+            conflicts=await self.conflicts(game, [p for f in files for p in f.players], attached),
             track_command=self.bot.command_mention("track start"),
+            host_command=self.bot.command_mention("partie lancer") if self.bot.settings.host_address else None,
             ping_role_id=config.ping_role_id,
             buttons=buttons,
         )
@@ -247,7 +271,7 @@ class GameManager:
             else:
                 upload.players = new.players
                 upload.invalid = new.invalid
-                upload.warnings = warnings(new.players)
+                upload.warnings = warnings(new.players) + await self.conflicts(game, new.players)
                 upload.replaced = [old.filename for old in replaced]
             uploads.append(upload)
         if any(u.error is None for u in uploads):
@@ -272,6 +296,8 @@ class GameManager:
         else:
             upload.apworld = apworld
             upload.replaced = [a.apworld.label for a in replaced]
+            players = [p for f in await self.files(game) for p in f.players]
+            upload.warnings = [conflict_text(*c) for c in version_conflicts(players, {apworld.game: apworld})]
         return upload
 
     async def use_apworld(self, game: GameRecord, user_id: int, apworld_id: int) -> Apworld:

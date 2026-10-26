@@ -73,32 +73,35 @@ def player_line(
     claims: dict[int, int],
     logic: dict[int, SlotLogic],
     *,
-    detailed: bool,
+    detail: int,
 ) -> str:
+    """detail 3: everything, 2: no presence, 1: game and logic only, 0: progress and name."""
     p = progress[slot]
     parts = [f"{progress_icon(slot, progress)} **{percent(p.ratio)}**", md(state.name(slot))]
-    blocked = slot in logic and logic[slot].blocked and not progress.reached_goal(slot)
-    if detailed:
-        parts.append(f"*{md(state.game(slot))}*")
-        if doable := in_logic(slot, progress, logic):
-            parts.append(doable)
-        if p.deaths:
-            parts.append(f"{E.death} {p.deaths}")
-        if here := presence(slot, state, progress):
-            parts.append(here)
-        if slot in claims:
-            parts.append(f"<@{claims[slot]}>")
-    elif blocked:
-        parts.append(E.blocked)
+    if not detail:
+        if slot in logic and logic[slot].blocked and not progress.reached_goal(slot):
+            parts.append(E.blocked)
+        return " · ".join(parts)
+    parts.append(f"*{md(state.game(slot))}*")
+    if doable := in_logic(slot, progress, logic):
+        parts.append(doable)
+    if detail >= 2 and p.deaths:
+        parts.append(f"{E.death} {p.deaths}")
+    if detail >= 3 and (here := presence(slot, state, progress)):
+        parts.append(here)
+    if detail >= 2 and slot in claims:
+        parts.append(f"<@{claims[slot]}>")
     return " · ".join(parts)
 
 
 def roster(state: RoomState, progress: Progress, claims: dict[int, int], logic: dict[int, SlotLogic]) -> str:
-    """Every player, best first; drops details then players if it doesn't fit in one message."""
+    """Every player, best first; drops details one level at a time, then players, to fit in one message."""
     slots = progress.ranking()
-    lines = [player_line(s, state, progress, claims, logic, detailed=True) for s in slots]
-    if sum(len(line) + 1 for line in lines) > ROSTER_BUDGET:
-        lines = [player_line(s, state, progress, claims, logic, detailed=False) for s in slots]
+    detail = 3
+    lines = [player_line(s, state, progress, claims, logic, detail=detail) for s in slots]
+    while detail and sum(len(line) + 1 for line in lines) > ROSTER_BUDGET:
+        detail -= 1
+        lines = [player_line(s, state, progress, claims, logic, detail=detail) for s in slots]
     return fit_lines(lines, ROSTER_BUDGET, lambda hidden: f"… et {hidden} autres · `/status joueur:` pour le détail")
 
 
@@ -136,12 +139,13 @@ def panel_view(
     claims: dict[int, int] | None = None,
     logic: dict[int, SlotLogic] | None = None,
     page_url: str | None = None,
+    address: str | None = None,
     buttons: list[ui.Item] | None = None,
 ) -> ui.LayoutView:
     title = f"## [{md(name)}]({page_url})" if page_url else f"## {md(name)}"
     status = (
         f"{summary_line(state, progress, logic)}\n"
-        f"-# {connection_label(state.connection)} · {state.address} · "
+        f"-# {connection_label(state.connection)} · {address or state.address} · "
         f"suivi depuis {discord.utils.format_dt(since, 'R')}"
     )
     players = roster(state, progress, claims or {}, logic or {}) or "*Aucun joueur*"

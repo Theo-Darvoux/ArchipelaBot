@@ -65,6 +65,8 @@ GLYPHS = {
     "calendar": ("calendar_month", LIGHT),
     "blocked": ("lock", RED),
     "reachable": ("lock_open_right", GREEN),
+    "patch": ("sports_esports", USEFUL),
+    "host": ("dns", GREEN),
 }
 
 

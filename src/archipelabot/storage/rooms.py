@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 
 from ..ap.protocol import ItemFlags
 from ..ap.webhost import WebhostRoom
+from ..core.hosting import Hosting, ServerOptions
 from ..core.logic import LogicSetup
 from .db import Database
 
@@ -48,6 +50,7 @@ class RoomRecord:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(microsecond=0))
     ended_at: datetime | None = None
     logic: LogicSetup | None = None
+    hosting: Hosting | None = None
     id: int | None = None
 
 
@@ -59,14 +62,16 @@ class RoomRepo:
         cur = await self.db.conn.execute(
             """
             INSERT INTO room (guild_id, thread_id, panel_message_id, name, address, webhost_base, webhost_room,
-                              slot, password, settings, status, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              slot, password, settings, status, created_by, created_at, host_folder, host_port,
+                              host_version, host_options)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 room.guild_id, room.thread_id, room.panel_message_id, room.name, room.address,
                 room.webhost and room.webhost.base_url, room.webhost and room.webhost.room_id,
                 room.slot, room.password, room.settings.model_dump_json(), room.status, room.created_by,
-                room.created_at.isoformat(),
+                room.created_at.isoformat(), room.hosting and room.hosting.folder, room.hosting and room.hosting.port,
+                room.hosting and room.hosting.version, room.hosting and json.dumps(asdict(room.hosting.options)),
             ),
         )  # fmt: skip
         await self.db.conn.commit()
@@ -80,6 +85,11 @@ class RoomRepo:
     async def by_thread(self, thread_id: int) -> RoomRecord | None:
         rows = await self._select("WHERE thread_id = ?", thread_id)
         return rows[0] if rows else None
+
+    async def hosted_ports(self) -> list[int]:
+        query = "SELECT host_port FROM room WHERE host_port IS NOT NULL AND status = 'active'"
+        async with self.db.conn.execute(query) as cur:
+            return [row[0] for row in await cur.fetchall()]
 
     async def active(self) -> list[RoomRecord]:
         return await self._select("WHERE status = 'active' ORDER BY id")
@@ -145,6 +155,14 @@ class RoomRepo:
                     bool(row["logic_from_room"]),
                 )
                 if row["logic_seed"]
+                else None,
+                hosting=Hosting(
+                    row["host_folder"],
+                    row["host_port"],
+                    row["host_version"],
+                    ServerOptions(**json.loads(row["host_options"])),
+                )
+                if row["host_folder"]
                 else None,
             )
             for row in rows

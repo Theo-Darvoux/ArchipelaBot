@@ -17,6 +17,7 @@ from ..ap.client import APError, ConnectOptions
 from ..ap.webhost import RoomNotFound, WebhostError
 from ..core import events as ev
 from ..core.chat import ChatRelay
+from ..core.hosting import slot_files
 from ..core.logic import (
     SAME_OPTIONS,
     Generated,
@@ -41,7 +42,7 @@ from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
 from .components import Tone, notice
 from .emojis import E
 from .forum import TAG_SPECS, Post, RoomTag, ensure_room_tags
-from .panel_buttons import ClaimButton, MyHintsButton, SettingsButton
+from .panel_buttons import ClaimButton, MyHintsButton, PatchButton, SettingsButton
 from .render.feed import feed_view
 from .render.panel import panel_view
 from .render.recap import CHART_FILENAME, recap_view
@@ -153,6 +154,7 @@ class RoomRuntime:
     claims: dict[int, int] = field(default_factory=dict)  # slot -> Discord user
     tasks: list[asyncio.Task] = field(default_factory=list)
     on_everyone_finished: Callable[[], None] = lambda: None
+    has_patches: bool = False
 
     def __post_init__(self) -> None:
         self.progress = Progress(self.tracker.state)
@@ -209,6 +211,11 @@ class RoomRuntime:
     def active(self) -> bool:
         return self.tracker.state.connection != ev.ConnectionState.STOPPED
 
+    @property
+    def play_address(self) -> str:
+        """Where players connect: the bot itself reaches the rooms it hosts locally."""
+        return self.record.address if self.record.hosting else self.tracker.state.address
+
     def render_panel(self, *, buttons: bool = True) -> ui.LayoutView:
         webhost = self.record.webhost
         return panel_view(
@@ -219,8 +226,15 @@ class RoomRuntime:
             claims=self.claims,
             logic=self.logic.results if self.active else None,
             page_url=webhost.page_url if webhost else None,
-            buttons=self._buttons(ClaimButton, MyHintsButton, SettingsButton) if buttons else None,
+            address=self.play_address,
+            buttons=self._buttons(*self._button_kinds()) if buttons else None,
         )
+
+    def _button_kinds(self) -> list[type[ui.DynamicItem]]:
+        kinds: list[type[ui.DynamicItem]] = [ClaimButton, MyHintsButton, SettingsButton]
+        if self.has_patches:
+            kinds.insert(1, PatchButton)
+        return kinds
 
     def _buttons(self, *kinds: type[ui.DynamicItem]) -> list[ui.Item] | None:
         return [kind(self.record.id) for kind in kinds] if self.active else None
@@ -350,7 +364,8 @@ class RoomManager:
             resolve, wake = resolve_webhost, wake_webhost
 
         options = ConnectOptions(slot=record.slot, password=record.password, tags=BOT_TAGS)
-        return RoomTracker(record.address, options, self.bot.datapackages, resolve_address=resolve, wake=wake)
+        address = record.hosting.local_address if record.hosting else record.address
+        return RoomTracker(address, options, self.bot.datapackages, resolve_address=resolve, wake=wake)
 
     async def attach(self, record: RoomRecord, tracker: RoomTracker) -> RoomRuntime:
         """Start posting a tracker's events in the record's forum post."""
@@ -367,6 +382,8 @@ class RoomManager:
             fetch_baseline=self._baseline_fetcher(record, tracker),
             claims=await self.claim_repo.for_room(record.id),
         )
+        if record.hosting:
+            runtime.has_patches = bool(await asyncio.to_thread(slot_files, self.bot.hosting.folder(record.hosting)))
         await runtime.progress_service.load()
         tracker.subscribe(runtime.on_event)
         runtime.tasks = [
@@ -525,7 +542,7 @@ class RoomManager:
 
     def check_abandoned(self, runtime: RoomRuntime) -> None:
         """Stop following a room that has been down and idle for too long."""
-        if runtime.tracker.state.connection in DOWN and runtime.abandoned():
+        if (runtime.tracker.state.connection in DOWN or runtime.record.hosting) and runtime.abandoned():
             self._abandon_soon(runtime.record.id, f"Aucune activité dans la room depuis {ABANDONED_AFTER.days} jours")
 
     async def reconnect(self, runtime: RoomRuntime, password: str | None = None) -> None:
@@ -538,6 +555,8 @@ class RoomManager:
                 await self.bot.webhost.wake(webhost)
             except WebhostError:
                 log.warning("Could not wake room %s", runtime.record.id, exc_info=True)
+        if runtime.record.hosting:
+            self.bot.hosting.ensure_running(runtime.record.id or 0)
         await runtime.tracker.reconnect()
 
     async def auto_claim(self, runtime: RoomRuntime) -> int:
@@ -628,6 +647,8 @@ class RoomManager:
     async def restore(self) -> None:
         """Resume every active room after a restart; they reconnect in the background."""
         for record in await self.repo.active():
+            if record.hosting:
+                await self.bot.hosting.resume(record)
             try:
                 tracker = self.build_tracker(record)
                 runtime = await self.attach(record, tracker)
@@ -656,6 +677,7 @@ class RoomManager:
             return False
         await self._detach(runtime)
         await self.repo.delete(runtime.record)
+        await self.bot.hosting.discard(runtime.record)
         return True
 
     async def shutdown(self) -> None:
@@ -665,6 +687,7 @@ class RoomManager:
         self._rooms.pop(runtime.record.id, None)
         await runtime.chat.close_all()
         await runtime.tracker.stop()
+        await self.bot.hosting.stop(runtime.record.id or 0)
         for task in runtime.tasks:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

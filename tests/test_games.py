@@ -532,6 +532,29 @@ async def test_unused_apworlds_are_not_regenerated(bot, game):
     assert "custom_worlds/spire.apworld" in names
 
 
+async def test_managers_replace_anyones_yaml_in_the_signups(bot, game):
+    record, thread = game
+    await bot.games.upload(record, 5, [FakeAttachment("opi.yaml", yaml("Opi"))])
+    cog = bot.get_cog("partie")
+    with pytest.raises(UserError, match="Seule la personne"):
+        await cog.yamls.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=6)))
+    with pytest.raises(UserError, match="dans le post d'une partie"):
+        await cog.yamls.callback(cog, click(bot, channel_id=999))
+
+    interaction = click(bot, channel_id=thread.id)
+    await cog.yamls.callback(cog, interaction)
+    view = interaction.response.sent[0]["view"]
+    assert "`opi.yaml` · <@5>" in view_text(view) and "/track logique" not in view_text(view)
+    send = click(bot)
+    await parts_of(view)["Envoyer des yamls"].callback(send)
+    modal = send.response.sent[0]["modal"]
+    modal.upload._values = [FakeAttachment("fixed.yaml", yaml("Opi", "Hacknet"))]
+    await modal.on_submit(click(bot))
+    [fixed] = await bot.games.files(record)
+    assert (fixed.filename, fixed.user_id, fixed.players[0].game) == ("fixed.yaml", 5, "Hacknet")
+    assert "*Hacknet* · <@5>" in view_text(thread.messages[0].view)
+
+
 @requires_ap_server
 async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     record, thread = game
@@ -551,7 +574,7 @@ async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     await cog.on_message(player)
     assert not player.reactions and not player.replies
     with pytest.raises(UserError, match="Seule la personne"):
-        await track.yamls.callback(track, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)))
+        await cog.yamls.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)))
 
     # the host, who started the tracking, adds the yaml that really generated Carol...
     fixed = FakeUserMessage(thread, attachments=[FakeAttachment("carol.yaml", dev["p3.yaml"])])
@@ -563,9 +586,10 @@ async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     assert owners == {"p2.yaml": 2, "old.yaml": 3, "extra.yaml": 3, "carol.yaml": 77, "alice.yaml": 1}
 
     interaction = click(bot, channel_id=thread.id)
-    await track.yamls.callback(track, interaction)
+    await cog.yamls.callback(cog, interaction)
     view = interaction.response.sent[0]["view"]
     assert "`carol.yaml` · <@77>\n**Carol** · *ChecksFinder*" in view_text(view)
+    assert "/track logique" in view_text(view)
     files = {f.filename: f for f in await bot.games.files(record)}
     select = parts_of(view)["Retirer des yamls"]
     select._values = [str(files["old.yaml"].id), str(files["extra.yaml"].id)]

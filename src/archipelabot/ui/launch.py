@@ -7,6 +7,7 @@ import discord
 
 from ..ap.client import APConnectionError, APRefused
 from ..ap.webhost import WebhostError, is_web_link, parse_room_url
+from ..core.hosting import Hosting, ServerOptions, remove
 from ..core.progress import Progress
 from ..core.room import RoomTracker
 from ..errors import UserError
@@ -50,6 +51,40 @@ async def launch_room(
         return await _launch(bot, guild, link, game.created_by, slot, password, name or game.name, game)
 
 
+async def host_game(
+    bot: "ArchipelaBot", guild: discord.Guild, game: GameRecord, options: ServerOptions, password: str | None
+) -> tuple[RoomRuntime, list[str]]:
+    """Generate the game from its post's yamls and apworlds, host it on the bot's machine, and track it there.
+
+    Returns the room and the yaml options the apworlds don't know."""
+    bot.hosting.check_available()
+    async with bot.games.starting(game):
+        generation = await bot.hosting.generate(game)
+        folder = bot.hosting.root / generation.generated.seed_name
+        try:
+            hosting, server = await bot.hosting.launch(generation, options, password)
+            try:
+                first = generation.generated.slots[min(generation.generated.slots)][0]
+                address = bot.hosting.public_address(hosting)
+                runtime, _ = await _launch(
+                    bot, guild, address, game.created_by, first, password, game.name, game, hosting=hosting
+                )
+            except BaseException:
+                await server.stop()
+                raise
+        except BaseException:
+            await generation.worker.close()
+            await asyncio.to_thread(remove, folder)
+            raise
+    assert runtime.record.id is not None
+    bot.hosting.adopt(runtime.record.id, server)
+    runtime.record.logic = generation.logic
+    await bot.rooms.repo.save_logic(runtime.record)
+    await runtime.logic.use(generation.worker)
+    runtime.panel.request_update(urgent=True)
+    return runtime, generation.warnings
+
+
 async def _launch(
     bot: "ArchipelaBot",
     guild: discord.Guild,
@@ -59,6 +94,8 @@ async def _launch(
     password: str | None,
     name: str | None,
     game: GameRecord | None,
+    *,
+    hosting: Hosting | None = None,
 ) -> tuple[RoomRuntime, int]:
     webhost = parse_room_url(link)
     if webhost is None and is_web_link(link):
@@ -76,7 +113,7 @@ async def _launch(
 
     record = RoomRecord(
         guild_id=guild.id, name=name or "", address=link.strip(), slot=slot or "", password=password,
-        created_by=user_id,
+        created_by=user_id, hosting=hosting,
     )  # fmt: skip
     woke = False
     if webhost:
@@ -164,7 +201,11 @@ async def _announce(runtime: RoomRuntime, participants: list[int]) -> None:
     mentions = " ".join(f"<@{user}>" for user in participants)
     webhost = runtime.record.webhost
     room = f"\nRoom : {webhost.page_url}" if webhost else ""
-    play = f"\nPour jouer : `{runtime.tracker.state.address}`"
+    play = f"\nPour jouer : `{runtime.play_address}`"
+    if runtime.record.password:
+        play += " · avec le mot de passe de la partie"
+    if runtime.has_patches:
+        play += f"\n{E.patch} Chacun récupère son patch avec **Mes patchs** sur le panneau."
     text = f"### {E.online} La room est ouverte !{room}{play}\n{mentions}".rstrip()
     allowed = discord.AllowedMentions(roles=False, users=[discord.Object(u) for u in participants])
     try:

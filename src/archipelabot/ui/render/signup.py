@@ -5,6 +5,7 @@ import discord
 from discord import ui
 
 from ...core.apworlds import Apworld, Attached
+from ...core.compat import Problem
 from ...core.yamls import PlayerYaml, YamlFile
 from ...storage.games import GameRecord
 from ..components import Tone
@@ -45,6 +46,25 @@ def missing_text(game: str, library: Sequence[Apworld], stray: Sequence[Apworld]
     return text + f" Envoie-le avec {E.yaml} **Mon yaml** ou dépose-le dans le post."
 
 
+def conflict_text(player: PlayerYaml, bound: str, version: str, apworld: Apworld) -> str:
+    asked = f"{version} ou plus" if bound == "min" else f"{version} au plus"
+    return (
+        f"{player_label(player)} veut *{md(apworld.game)}* {md(asked)}, l'apworld de la partie est en "
+        f"v{md(apworld.version)}"
+    )
+
+
+def problem_text(problem: Problem) -> str:
+    who = f"**{md(problem.player)}**" if problem.player else code(problem.filename)
+    if problem.game:
+        who += f" · *{md(problem.game)}*"
+    if not problem.error:
+        return f"{who} : option {code(problem.option or '?')} inconnue de cet apworld (yaml d'une autre version ?)"
+    if problem.option:
+        return f"{who} : {code(f'{problem.option}: {problem.value}')} refusé · {md(problem.detail)}"
+    return f"{who} : {md(problem.detail)}"
+
+
 def library_text(apworld: Apworld) -> str:
     sent = f" le {apworld.uploaded_at:%d/%m/%Y}" if apworld.uploaded_at else ""
     return f"{E.apworld} {apworld_label(apworld)}\n-# Envoyé sur le serveur par <@{apworld.uploaded_by}>{sent}"
@@ -56,11 +76,13 @@ def bulleted(lines: Callable[[str], list[str]], icon: str, budget: int) -> list[
     return full if sum(len(line) + 1 for line in full) <= budget else lines("-")
 
 
-def apworlds_section(apworlds: Sequence[Attached], missing: Sequence[str]) -> str:
+def apworlds_section(apworlds: Sequence[Attached], missing: Sequence[str], conflicts: Sequence[str] = ()) -> str:
     def lines(bullet: str) -> list[str]:
-        return [f"{bullet} {apworld_label(a.apworld)} · <@{a.user_id}>" for a in apworlds] + [
-            f"⚠️ *{md(game)}* · apworld manquant" for game in missing
-        ]
+        return (
+            [f"{bullet} {apworld_label(a.apworld)} · <@{a.user_id}>" for a in apworlds]
+            + [f"⚠️ *{md(game)}* · apworld manquant" for game in missing]
+            + [f"⚠️ {conflict}" for conflict in conflicts]
+        )
 
     return f"### {E.apworld} Apworlds\n" + fit_lines(
         bulleted(lines, E.apworld, APWORLDS_BUDGET), APWORLDS_BUDGET, lambda hidden: f"… et {hidden} autres"
@@ -89,10 +111,12 @@ def signup_view(
     files: Sequence[YamlFile],
     *,
     track_command: str = "`/track start`",
+    host_command: str | None = None,
     ping_role_id: int | None = None,
     buttons: list[ui.Item] | None = None,
     apworlds: Sequence[Attached] = (),
     missing: Sequence[str] = (),
+    conflicts: Sequence[str] = (),
 ) -> ui.LayoutView:
     header = f"## {md(game.name)}"
     if game.starts_at:
@@ -115,7 +139,12 @@ def signup_view(
         f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "
         "partie et chacun est relié à son slot."
     )
-    apworlds_text = apworlds_section(apworlds, missing) if apworlds or missing else ""
+    if host_command:
+        steps += (
+            f"\n-# Ou, à la place des étapes 2 et 3, {host_command} : le bot génère la partie et l'{E.host} héberge "
+            f"lui-même. Chacun récupère alors son {E.patch} patch sur le panneau."
+        )
+    apworlds_text = apworlds_section(apworlds, missing, conflicts) if apworlds or missing or conflicts else ""
 
     slots = sum(len(f.players) for f in files)
     people = len({f.user_id for f in files})
@@ -159,7 +188,7 @@ def upload_text(upload: Upload) -> str:
         text = f"{E.apworld} **{md(upload.filename)}** : apworld {apworld_label(upload.apworld)}"
         if upload.replaced:
             text += "\n-# Remplace " + ", ".join(md(label) for label in upload.replaced)
-        return text
+        return text + "".join(f"\n-# ⚠️ {warning}" for warning in upload.warnings)
     if upload.invalid:
         text = f"{E.yaml} **{md(upload.filename)}** : ⚠️ {upload.invalid}\n-# {INVALID_KEPT}"
     else:

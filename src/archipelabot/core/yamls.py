@@ -27,6 +27,7 @@ class YamlSyntaxError(YamlError):
 class PlayerYaml:
     name: str
     game: str | None  # None when the generator picks it at random
+    requires: tuple[tuple[str, str, str], ...] = ()  # (game, min, max) world versions, "" when not set
 
     @property
     def templated(self) -> bool:
@@ -103,7 +104,7 @@ def _player(document: object) -> PlayerYaml:
     name = name.strip()
     if name == "Archipelago":
         raise YamlError("Le nom `Archipelago` est réservé par Archipelago.")
-    return PlayerYaml(name, _game(document.get("game")))
+    return PlayerYaml(name, _game(document.get("game")), _requires(document.get("requires")))
 
 
 def _game(value: object) -> str | None:
@@ -114,6 +115,19 @@ def _game(value: object) -> str | None:
         if weighted:
             return weighted[0] if len(weighted) == 1 else None
     raise YamlError("Il manque le jeu (`game`).")
+
+
+def _requires(value: object) -> tuple[tuple[str, str, str], ...]:
+    games = value.get("game") if isinstance(value, dict) else None
+    if not isinstance(games, dict):
+        return ()
+    found = []
+    for game, version in games.items():
+        if isinstance(version, str | int | float) and not isinstance(version, bool):
+            found.append((str(game), str(version), ""))
+        elif isinstance(version, dict):
+            found.append((str(game), str(version.get("min") or ""), str(version.get("max") or "")))
+    return tuple(found)
 
 
 def warnings(players: Iterable[PlayerYaml]) -> list[str]:

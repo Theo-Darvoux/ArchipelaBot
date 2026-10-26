@@ -8,6 +8,8 @@ import discord
 from discord import ui
 
 from ..core.apworlds import Apworld, Attached
+from ..core.compat import Problem
+from ..core.logic import LogicError
 from ..core.yamls import YamlFile, unique_filenames
 from ..errors import UserError
 from ..storage.games import GameRecord
@@ -21,10 +23,11 @@ from .render.signup import (
     library_text,
     missing_text,
     player_label,
+    problem_text,
     upload_text,
     upload_tone,
 )
-from .render.text import code, md, plural
+from .render.text import code, fit_lines, md, plural
 
 if TYPE_CHECKING:
     from .games import GameManager
@@ -33,6 +36,7 @@ if TYPE_CHECKING:
 CLOSED = "Les inscriptions de cette partie sont fermées."
 MAX_FILES = 10
 MAX_PROMPTS = 5
+CHECK_BUDGET = 3500
 FILENAME = re.compile(r"[^\w.-]")
 
 
@@ -367,3 +371,54 @@ class YamlsZipButton(ui.DynamicItem[ui.Button], template=r"archipelabot:yamlzip:
                 await interaction.response.send_message(view=view, file=file, ephemeral=True)
             else:
                 await interaction.followup.send(view=view, file=file, ephemeral=True)
+
+
+class CheckButton(ui.DynamicItem[ui.Button], template=r"archipelabot:check:(?P<game>\d+)"):
+    """Load the apworlds in Archipelago and check every yaml against them: only the host runs their code."""
+
+    def __init__(self, game_id: int) -> None:
+        super().__init__(
+            ui.Button(label="Vérifier", emoji=E.partial("reachable"), style=discord.ButtonStyle.secondary,
+                      custom_id=f"archipelabot:check:{game_id}")
+        )  # fmt: skip
+        self.game_id = game_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: "Interaction", item: ui.Button, match: re.Match[str]) -> "CheckButton":
+        return cls(int(match["game"]))
+
+    async def callback(self, interaction: "Interaction") -> None:
+        game = _open_game(interaction, self.game_id)
+        if game is None:
+            await interaction.response.send_message(view=notice(CLOSED, Tone.WARNING), ephemeral=True)
+            return
+        if interaction.user.id != game.created_by and not interaction.permissions.manage_threads:
+            text = (
+                "Seule la personne qui a annoncé la partie (ou un modérateur) peut lancer la vérification : elle "
+                "exécute le code des apworlds sur la machine du bot."
+            )
+            await interaction.response.send_message(view=notice(text, Tone.ERROR), ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            version, problems = await interaction.client.games.check(game)
+        except LogicError as e:
+            await interaction.followup.send(view=notice(str(e), Tone.ERROR), ephemeral=True)
+            return
+        await interaction.followup.send(view=check_report(version, problems), ephemeral=True)
+
+
+def check_report(version: str, problems: Sequence[Problem]) -> ui.LayoutView:
+    errors = [problem_text(p) for p in problems if p.error]
+    warnings = [problem_text(p) for p in problems if not p.error]
+    if not problems:
+        return notice(f"{E.reachable} Tous les yamls passent avec les apworlds de la partie (Archipelago {version}).",
+                      Tone.SUCCESS)  # fmt: skip
+    lines = []
+    if errors:
+        lines += [f"### {E.error} {plural(len(errors), 'erreur')} · la génération échouera", *errors]
+    if warnings:
+        lines += [f"### ⚠️ {plural(len(warnings), 'option inconnue', 'options inconnues')}", *warnings]
+        lines.append("-# Archipelago les ignore, mais c'est souvent un yaml fait pour une autre version de l'apworld.")
+    text = fit_lines(lines, CHECK_BUDGET, lambda hidden: f"… et {hidden} autres")
+    return notice(f"{text}\n-# Archipelago {version}", Tone.ERROR if errors else Tone.WARNING)

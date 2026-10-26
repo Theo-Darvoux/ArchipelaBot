@@ -267,12 +267,22 @@ class LogicWorker:
 
     @classmethod
     async def start(
-        cls, python: Path, archipelago: Path, seed: int, plando: str, files: Iterable[tuple[str, bytes]]
+        cls,
+        python: Path,
+        archipelago: Path,
+        seed: int,
+        plando: str,
+        files: Iterable[tuple[str, bytes]],
+        *,
+        output: bool = False,
     ) -> tuple["LogicWorker", Generated]:
-        """`files`: (path, content) laid out like the Archipelago folder, Players/ and custom_worlds/."""
+        """`files`: (path, content) laid out like the Archipelago folder, Players/ and custom_worlds/.
+
+        `output`: also write the seed's zip, see `output_zip`.
+        """
         workdir = Path(await asyncio.to_thread(tempfile.mkdtemp, prefix="archipelabot-logic-"))
         try:
-            await asyncio.to_thread(_write, workdir, list(files))
+            await asyncio.to_thread(write_files, workdir, list(files))
             with (workdir / "worker.log").open("wb") as stderr:
                 process = await asyncio.create_subprocess_exec(
                     str(python), "-I", str(WORKER),
@@ -285,13 +295,22 @@ class LogicWorker:
             raise
         worker = cls(process, workdir)
         try:
-            job = {"archipelago": str(archipelago), "workdir": str(workdir), "seed": seed, "plando": plando}
+            job = {
+                "archipelago": str(archipelago), "workdir": str(workdir), "seed": seed, "plando": plando,
+                "output": output,
+            }  # fmt: skip
             ready = (await worker._request(job, GENERATE_TIMEOUT))["ready"]
         except BaseException:
             await worker.close()
             raise
         slots = {int(slot): (info["name"], info["game"]) for slot, info in ready["slots"].items()}
         return worker, Generated(ready["seed_name"], ready["version"], ready["fingerprint"], slots)
+
+    def output_zip(self) -> Path:
+        found = sorted((self.workdir / "output").glob("AP_*.zip"))
+        if not found:
+            raise LogicError("La génération n'a pas produit de zip.")
+        return found[0]
 
     async def evaluate(self, checked: dict[int, Iterable[int]]) -> dict[int, SlotLogic]:
         answer = await self._request({"cmd": "evaluate", "checked": {s: list(ids) for s, ids in checked.items()}})
@@ -348,7 +367,7 @@ class LogicWorker:
         await asyncio.to_thread(shutil.rmtree, self.workdir, True)
 
 
-def _write(workdir: Path, files: list[tuple[str, bytes]]) -> None:
+def write_files(workdir: Path, files: list[tuple[str, bytes]]) -> None:
     for folder in ("Players", "custom_worlds", "output"):
         (workdir / folder).mkdir()
     for path, content in files:

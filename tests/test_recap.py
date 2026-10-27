@@ -54,6 +54,7 @@ def test_build_recap():
     assert [f.slot for f in recap.finishers] == [1]
     assert recap.unfinished == [(2, 0.5), (3, 0.2)]
     assert (recap.checks_done, recap.checks_total) == (17, 30)
+    assert recap.checks_in_logic == {}
     assert (recap.deaths, recap.death_champion, recap.hints, recap.releases) == (3, (2, 2), 1, 1)
     alice = next(s for s in recap.series if s.slot == 1)
     assert [r for _, r in alice.points] == [0.2, 0.6, 1.0] and alice.goal_at == T0 + timedelta(hours=3, minutes=5)
@@ -79,6 +80,7 @@ def test_recap_view_and_chart():
     png = render_chart(recap, state.name, ZoneInfo("Europe/Paris"))
     assert png.startswith(b"\x89PNG") and len(png) > 10_000
     assert "🔒" not in text and "aucun bloqué" not in text
+    assert "en logique" not in text and "objectif faisable" not in text
 
 
 def test_recap_during_the_game_shows_who_is_blocked():
@@ -86,14 +88,19 @@ def test_recap_during_the_game_shows_who_is_blocked():
     logic = {1: SlotLogic(frozenset(), False), 2: SlotLogic(frozenset(), False), 3: SlotLogic(frozenset({4}), False)}
     recap = build_recap("Async", T0, T0 + timedelta(hours=4), state, progress, events, snapshots, logic)
     assert recap.blocked == {2}  # Alice reached her goal
+    assert recap.checks_in_logic == {2: 0, 3: 1}
     text = view_text(recap_view(recap, state, chart=False))
-    assert "◑ Bob · *SM* · 50 % · 🔒 **bloqué**" in text and "Carol · *ALttP* · 20 %\n" in text
+    assert "◑ Bob · *SM* · 50 % · 🔒 **bloqué**" in text
+    assert "Carol · *ALttP* · 20 % · 🔓 1 check en logique\n" in text
     assert "🔒 1 bloqué" in text
 
     logic[2] = SlotLogic(frozenset(), True)
+    logic[3] = SlotLogic(frozenset({4, 5}), False)
     recap = build_recap("Async", T0, T0 + timedelta(hours=4), state, progress, events, snapshots, logic)
     text = view_text(recap_view(recap, state, chart=False))
     assert "🔓 aucun bloqué" in text and "🔒" not in text
+    assert "Bob · *SM* · 50 % · 🔓 objectif faisable\n" in text
+    assert "Carol · *ALttP* · 20 % · 🔓 2 checks en logique\n" in text
 
 
 CLIENTS = {"Alice": "Celeste 64", "Bob": "A Short Hike", "Carol": "ChecksFinder"}

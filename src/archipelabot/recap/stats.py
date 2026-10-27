@@ -38,6 +38,7 @@ class Recap:
     collects: int
     series: list[Series] = field(default_factory=list)
     blocked: frozenset[int] | None = None  # None: logic unknown
+    checks_in_logic: dict[int, int] = field(default_factory=dict)
 
     @property
     def everyone_finished(self) -> bool:
@@ -79,6 +80,7 @@ def build_recap(
         collects=kinds["collect"],
         series=build_series(players, progress, snapshots, ended),
         blocked=frozenset(slot for slot, _ in unfinished if slot in logic and logic[slot].blocked) if logic else None,
+        checks_in_logic={slot: logic[slot].accessible for slot, _ in unfinished if slot in logic} if logic else {},
     )
 
 

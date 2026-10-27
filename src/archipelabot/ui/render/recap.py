@@ -38,6 +38,10 @@ def podium(recap: Recap, state: RoomState) -> str:
         line = f"{E.ring(ratio)} {md(state.name(slot))} · *{md(state.game(slot))}* · {percent} %"
         if recap.blocked and slot in recap.blocked:
             line += f" · {E.blocked} **bloqué**"
+        elif slot in recap.checks_in_logic:
+            count = recap.checks_in_logic[slot]
+            doable = f"{plural(count, 'check')} en logique" if count else "objectif faisable"
+            line += f" · {E.reachable} {doable}"
         lines.append(line)
     return fit_lines(lines, PODIUM_BUDGET, lambda hidden: f"-# … et {plural(hidden, 'autre joueur', 'autres joueurs')}")
 

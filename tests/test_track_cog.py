@@ -217,9 +217,10 @@ async def test_rooms_idle_for_a_week_are_stopped(bot, discord_env, ap_server):
     assert runtime.abandoned(now)
 
     bot.rooms._abandon_soon(runtime.record.id, "Aucune activité")
-    await wait_until(lambda: bot.rooms.get(runtime.record.id) is None)
+    await bot.rooms._stopping[runtime.record.id]
     assert any("Aucune activité : suivi arrêté" in text for text in thread.texts())
     assert (await bot.rooms.repo.get(runtime.record.id)).status == "stopped"
+    assert [t.name for t in thread.applied_tags] == ["Abandonnée"]
 
 
 async def test_a_room_that_cannot_resume_does_not_block_the_others(bot, discord_env, ap_server):
@@ -340,8 +341,9 @@ async def test_rooms_down_for_a_week_are_abandoned(bot, discord_env):
     server.stop()
     await wait_until(lambda: runtime.tracker.state.connection != ev.ConnectionState.CONNECTED)
     bot.rooms.check_abandoned(runtime)
-    await wait_until(lambda: bot.rooms.get(runtime.record.id) is None)
+    await bot.rooms._stopping[runtime.record.id]
     assert any("Aucune activité dans la room depuis 7 jours" in text for text in thread.texts())
+    assert [t.name for t in thread.applied_tags] == ["Abandonnée"]
 
 
 async def test_a_short_404_of_the_site_does_not_stop_the_room(bot, discord_env, monkeypatch):

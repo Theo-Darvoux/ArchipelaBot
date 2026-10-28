@@ -27,7 +27,7 @@ async def test_ensure_room_tags_creates_only_missing():
 
     assert tags[RoomTag.ACTIVE].id == 42
     names = [t.name for t in forum.available_tags]
-    assert names == ["En cours", "Autre", "Inscriptions", "Endormie", "Terminée", "Annulée"]
+    assert names == ["En cours", "Autre", "Inscriptions", "Endormie", "Terminée", "Abandonnée", "Annulée"]
     assert set(tags) == set(TAG_SPECS)
 
 
@@ -39,7 +39,7 @@ async def test_set_forum_saves_config_and_creates_tags(bot):
     await cog.set_forum.callback(cog, interaction, forum)
 
     assert (await bot.guild_configs.get(1)).forum_id == 555
-    assert len(forum.available_tags) == 5
+    assert len(forum.available_tags) == 6
     [reply] = interaction.replies
     assert reply["ephemeral"] and "<#555>" in view_text(reply["view"])
 

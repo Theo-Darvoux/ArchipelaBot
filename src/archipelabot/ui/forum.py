@@ -9,6 +9,7 @@ class RoomTag(StrEnum):
     ACTIVE = "active"
     ASLEEP = "asleep"
     FINISHED = "finished"
+    ABANDONED = "abandoned"
     CANCELLED = "cancelled"
 
 
@@ -23,6 +24,7 @@ TAG_SPECS: dict[RoomTag, tuple[str, str]] = {
     RoomTag.ACTIVE: ("En cours", "🟢"),
     RoomTag.ASLEEP: ("Endormie", "💤"),
     RoomTag.FINISHED: ("Terminée", "🏁"),
+    RoomTag.ABANDONED: ("Abandonnée", "⏹️"),
     RoomTag.CANCELLED: ("Annulée", "❌"),
 }
 

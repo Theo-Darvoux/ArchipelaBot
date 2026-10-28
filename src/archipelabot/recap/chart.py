@@ -18,6 +18,7 @@ PALETTE = [
     "#AF99EF", "#6D8BE8", "#00D2D2", "#FA8072", "#F0B232", "#57F287", "#EB459E", "#FEE75C",
     "#5865F2", "#ED4245", "#3BA55C", "#FAA61A", "#9B84EE", "#45DDC0", "#F47FFF", "#B9BBBE",
 ]  # fmt: skip
+LINE_STYLES = ["-", "--", ":", "-."]
 FONT = {"family": ["Inter", "Noto Sans", "DejaVu Sans"], "size": 13}
 
 
@@ -43,9 +44,12 @@ def render_chart(recap: Recap, name_of: Callable[[int], str], tz: tzinfo) -> byt
     ordered = sorted(recap.series, key=lambda s: -s.points[-1][1])
     for i, series in enumerate(ordered):
         colour = PALETTE[i % len(PALETTE)]
+        # Shift styles when colours repeat so the same colour gets a different pattern.
+        line_style = LINE_STYLES[(i + i // len(PALETTE)) % len(LINE_STYLES)]
         times = [at for at, _ in series.points]
         ratios = [ratio for _, ratio in series.points]
-        axes.plot(times, ratios, drawstyle="steps-post", color=colour, linewidth=2.2, label=name_of(series.slot))
+        axes.plot(times, ratios, drawstyle="steps-post", color=colour, linestyle=line_style,
+                  linewidth=2.2, label=name_of(series.slot))  # fmt: skip
         if series.goal_at:
             axes.plot([series.goal_at], [value_at(series, series.goal_at)], marker="*", markersize=18,
                       color=GOLD, markeredgecolor=BACKGROUND, markeredgewidth=1.2, zorder=5)  # fmt: skip
@@ -62,7 +66,7 @@ def render_chart(recap: Recap, name_of: Callable[[int], str], tz: tzinfo) -> byt
 
     legend = axes.legend(
         loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=min(4, max(1, len(ordered))),
-        frameon=False, labelcolor=TEXT, handlelength=1.4, prop=FONT,
+        frameon=False, labelcolor=TEXT, handlelength=3, prop=FONT,
     )  # fmt: skip
     for line in legend.get_lines():
         line.set_linewidth(4)

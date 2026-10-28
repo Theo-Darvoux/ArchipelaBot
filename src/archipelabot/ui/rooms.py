@@ -591,7 +591,7 @@ class RoomManager:
                 await runtime.sink.send_lines(FeedMessage((f"{E.stopped} {reason} : suivi arrêté.",)))
             except discord.HTTPException:
                 log.warning("Could not announce the end of room %s", room_id, exc_info=True)
-            await self.stop(runtime, "stopped")
+            await self.stop(runtime, "stopped", tag=RoomTag.ABANDONED)
 
         self._later(room_id, abandon)
 
@@ -660,14 +660,14 @@ class RoomManager:
             tracker.resume()
         log.info("Resumed %d rooms", len(self._rooms))
 
-    async def stop(self, runtime: RoomRuntime, status: RoomStatus) -> None:
+    async def stop(self, runtime: RoomRuntime, status: RoomStatus, *, tag: RoomTag = RoomTag.FINISHED) -> None:
         if self._rooms.get(runtime.record.id) is not runtime:
             return
         await self._detach(runtime)
         await self.repo.set_status(runtime.record, status)
         try:
             await runtime.sink.edit_panel(runtime.render_panel())
-            await runtime.sink.set_tag(RoomTag.FINISHED)
+            await runtime.sink.set_tag(tag)
         except discord.HTTPException:
             log.warning("Could not finalize the post of room %s", runtime.record.id, exc_info=True)
 

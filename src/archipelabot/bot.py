@@ -19,7 +19,7 @@ from .ui.components import send_error
 from .ui.emojis import ensure_uploaded
 from .ui.games import GameManager
 from .ui.hosting import HostManager
-from .ui.manage import GameManageButton
+from .ui.manage import GameManageButton, LaunchButton
 from .ui.panel_buttons import ClaimButton, MyHintsButton, PatchButton, SettingsButton
 from .ui.rooms import RoomManager
 from .ui.signup_buttons import CheckButton, YamlButton, YamlsZipButton
@@ -103,6 +103,7 @@ class ArchipelaBot(commands.Bot):
             YamlsZipButton,
             CheckButton,
             GameManageButton,
+            LaunchButton,
         )
         await self.load_extensions()
         await self.sync_commands()

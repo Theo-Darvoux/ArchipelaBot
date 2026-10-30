@@ -28,8 +28,8 @@ def help_pages(cmd: Callable[[str], str]) -> list[HelpPage]:
         "### Pour commencer\n"
         f"**1.** Un admin choisit les forums avec {cmd('config')}.\n"
         f"**2.** Quelqu'un annonce la partie avec {cmd('partie nouvelle')}, et chacun y envoie son yaml.\n"
-        f"**3.** {E.settings} **Gérer** puis **Lancer** (le bot génère et héberge), ou {cmd('track start')} avec le "
-        "lien de la room.\n"
+        f"**3.** L'organisateur clique sur {E.host} **Lancer** : le bot génère et héberge la partie (ou "
+        f"{cmd('track start')} avec le lien d'une room hébergée ailleurs).\n"
         f"**4.** Chacun clique sur {E.claim} **Je joue** sur le panneau.\n"
         "-# Les boutons ci-dessous détaillent chaque étape."
     )
@@ -43,8 +43,8 @@ def help_pages(cmd: Callable[[str], str]) -> list[HelpPage]:
         f"officiel · {E.zip} **Tous les yamls** : le zip pour générer\n"
         f"Pour l'organisateur et les modérateurs : {E.reachable} **Vérifier** teste chaque yaml avec les apworlds de "
         "la partie, comme à la génération (options invalides, options inconnues) · "
-        f"{E.settings} **Gérer** : **Lancer** la partie (le bot la génère et l'{E.host} héberge, logique déjà "
-        "active), la modifier, corriger les yamls de n'importe qui, ou l'annuler\n"
+        f"{E.host} **Lancer** : le bot génère la partie et l'héberge, logique déjà active · {E.settings} **Gérer** : "
+        "la modifier, corriger les yamls de n'importe qui, ou l'annuler\n"
         f"-# Sans inscriptions, {cmd('track start')} crée directement le post de la room."
     )
     room = (

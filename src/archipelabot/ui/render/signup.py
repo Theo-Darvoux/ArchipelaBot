@@ -135,11 +135,20 @@ def signup_view(
         f"**1.** Clique sur le bouton **{E.yaml} Mon yaml** pour **envoyer**, **modifier**, ou **retirer** ton "
         "fichier `.yaml` tant que la partie n'a pas commencé. Tu peux aussi le glisser dans ce post. Si ton jeu "
         "n'est pas officiel, ajoute son `.apworld` de la même façon.\n"
-        f"**2.** Quand tout le monde est inscrit, l'organisateur récupère **{E.zip} Tous les yamls** (avec les "
-        "apworlds) et génère la partie.\n"
-        f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "
-        "partie et chacun est relié à son slot."
     )
+    if can_host:
+        steps += (
+            f"**2.** Quand tout le monde est inscrit, l'organisateur clique sur **{E.host} Lancer** : le bot génère la "
+            "partie et l'héberge lui-même. Ce message devient le suivi de la partie, chacun est relié à son slot et "
+            f"récupère son {E.patch} patch sur le panneau."
+        )
+    else:
+        steps += (
+            f"**2.** Quand tout le monde est inscrit, l'organisateur récupère **{E.zip} Tous les yamls** (avec les "
+            "apworlds) et génère la partie.\n"
+            f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de "
+            "la partie et chacun est relié à son slot."
+        )
     organiser = f"{E.settings} **Gérer** : modifier la partie, corriger les yamls de n'importe qui, ou l'annuler"
     if can_check:
         organiser = (
@@ -149,8 +158,8 @@ def signup_view(
     steps += f"\n-# Pour l'organisateur et les modérateurs · {organiser}."
     if can_host:
         steps += (
-            f"\n-# Ou, à la place des étapes 2 et 3, {E.settings} **Gérer** puis **Lancer** : le bot génère la partie "
-            f"et l'{E.host} héberge lui-même. Chacun récupère alors son {E.patch} patch sur le panneau."
+            f"\n-# Partie générée et hébergée ailleurs ? **{E.zip} Tous les yamls** donne le zip pour générer, puis "
+            f"{track_command} ici avec le lien de la room."
         )
     apworlds_text = apworlds_section(apworlds, missing, conflicts) if apworlds or missing or conflicts else ""
 

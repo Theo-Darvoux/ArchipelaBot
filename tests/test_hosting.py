@@ -18,13 +18,14 @@ from archipelabot.core.hosting import (
 from archipelabot.errors import UserError
 from archipelabot.storage.rooms import RoomRecord, RoomRepo
 from archipelabot.ui.hosting import HostManager
+from archipelabot.ui.manage import LaunchButton
 from archipelabot.ui.panel_buttons import PatchButton
 from archipelabot.ui.rooms import RoomManager
 
 from .ap_server import AP_DIR, DEV_DIR, free_port, requires_ap_server
 from .fakes import FakeAttachment, FakeInteraction, button_labels, view_text
-from .test_games import click, game, game_manage  # noqa: F401
-from .test_track_cog import buttons_of, discord_env, wait_until  # noqa: F401
+from .test_games import click, game  # noqa: F401
+from .test_track_cog import discord_env, wait_until  # noqa: F401
 
 CAROL = ConnectOptions(slot="Carol", game="ChecksFinder", tags=(), items_handling=0b111, uuid="carol")
 
@@ -75,20 +76,26 @@ async def test_hosting_is_stored(db):
     assert await repo.hosted_ports() == []
 
 
-async def launch_modal(bot, record):
-    view = await game_manage(bot, record)
-    interaction = click(bot)
-    await buttons_of(view)["Lancer"].callback(interaction)
-    return interaction.response.sent[0]["modal"]
+async def launch_modal(bot, record, user=77):
+    interaction = click(bot, user=user)
+    await LaunchButton(record.id).callback(interaction)
+    return interaction.response.sent[0]["modal" if user == 77 else "view"]
 
 
 async def test_hosting_needs_an_address(bot, game):  # noqa: F811
     record, thread = game
-    assert "Lancer" not in buttons_of(await game_manage(bot, record))
-    assert "**Lancer**" not in view_text(await bot.games.render(record))
+    panel = await bot.games.render(record)
+    assert "Lancer" not in button_labels(panel) and "`/track start` ici avec le lien" in view_text(panel)
+    with pytest.raises(UserError, match="HOST_ADDRESS"):
+        await launch_modal(bot, record)
+
     bot.settings.host_address = "play.example"
-    assert "**Gérer** puis **Lancer** : le bot génère" in view_text(await bot.games.render(record))
-    assert "Seule la personne" in view_text(await game_manage(bot, record, user=5))
+    panel = await bot.games.render(record)
+    assert button_labels(panel) == ["Mon yaml", "Tous les yamls", "Lancer", "Gérer"]
+    text = view_text(panel)
+    assert "**2.** Quand tout le monde est inscrit, l'organisateur clique sur **🖥️ Lancer**" in text
+    assert "**3.**" not in text and "Partie générée et hébergée ailleurs ?" in text
+    assert "Seule la personne" in view_text(await launch_modal(bot, record, user=5))
 
     modal = await launch_modal(bot, record)
     modal.to_components()

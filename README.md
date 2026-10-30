@@ -27,7 +27,8 @@ pont de chat. Tous les checks vont dans un post à part, dans un forum de suivi 
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
 | `/config` | Toute la configuration du serveur sur un panneau, chaque réglage avec son menu (permission *Gérer le serveur*). **Forum des parties** : où chaque partie a son post. **Suivi complet** : le forum où chaque room a son suivi complet (items, morts, hints, release…), le post de la room ne gardant que le chat, les goals et les pings. **Récaps** : un salon où publier aussi les récaps. **Apworlds** : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties. **Annonces** : le rôle pingé quand une partie est annoncée et quand sa room ouvre. **Création des parties** : tous les membres ou les admins seulement |
-| Bouton **Gérer** du post d'inscriptions | **Lancer** la partie (le bot la génère et l'héberge, voir plus bas ; seulement avec `HOST_ADDRESS`), **Modifier** la partie (nom, date, description), corriger les **Yamls** de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire), ou **Annuler la partie** (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
+| Bouton **Lancer** du post d'inscriptions | Le bot génère la partie avec les yamls et apworlds du post, l'héberge et la suit dans ce post (voir plus bas ; seulement avec `HOST_ADDRESS`). Réservé à qui l'a annoncée et aux modérateurs |
+| Bouton **Gérer** du post d'inscriptions | **Modifier** la partie (nom, date, description), corriger les **Yamls** de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire), ou **Annuler la partie** (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
 | Bouton **Gérer** du panneau d'une room | **Reconnecter** (en changeant le mot de passe si besoin), **Logique** (envoyer le spoiler log de la génération : le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique, voir plus bas), **Apworlds** et **Yamls** (room lancée depuis une partie : corriger après coup ceux qui ont servi à générer, puis renvoyer le spoiler avec **Logique**), **Récap** (podium, chiffres, graphique, même une fois le suivi arrêté), **Arrêter** (avec ou sans récap, ou retour aux inscriptions après un mauvais lien), et ce qu'affiche le suivi complet. Réservé à qui a lancé le suivi et aux modérateurs |
 | `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
@@ -76,7 +77,9 @@ instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une 
    peuvent tirer. Il signale les valeurs refusées (la génération échouerait) et les options que l'apworld ne
    connaît pas (souvent un yaml fait pour une autre version). Cette vérification exécute le code des apworlds du
    post sur la machine du bot.
-3. Quand la room est prête, lance `/track start` dans le post avec son lien : le panneau devient celui de la room,
+3. Quand tout le monde est inscrit, l'organisateur clique sur **Lancer** : le bot génère et héberge la partie (voir
+   [Héberger une partie](#héberger-une-partie)). Si la room est hébergée ailleurs (archipelago.gg…), il lance à la
+   place `/track start` dans le post avec son lien. Dans les deux cas, le panneau devient celui de la room,
    le tag passe à *En cours*, chaque slot est attribué à qui a envoyé son yaml (les noms avec `{number}` ou
    `{player}` quand il n'y a pas d'ambiguïté), et le bot pinge le rôle et les joueurs inscrits. Un lien collé dans
    le post ne lance rien : pas de risque de suivre la mauvaise room.
@@ -85,7 +88,7 @@ Le bot supprime le message « a épinglé un message » qui suit l'épinglage du
 
 ## Héberger une partie
 
-À la place des étapes 2 et 3, **Gérer** puis **Lancer** dans le post : le bot génère la partie avec Archipelago (la version
+C'est la façon par défaut quand le bot a `HOST_ADDRESS` : **Lancer** dans le post, et le bot génère la partie avec Archipelago (la version
 installée la plus récente), à partir des yamls et apworlds du post, puis lance son serveur sur sa propre machine.
 Le post devient le suivi de la room, comme avec `/track start`, avec en plus :
 

@@ -231,38 +231,24 @@ def can_organise(game: GameRecord, user_id: int, permissions: discord.Permission
 
 
 class GameManageView(View):
-    def __init__(self, game: GameRecord, *, can_host: bool = False) -> None:
+    def __init__(self, game: GameRecord) -> None:
         super().__init__(timeout=600)
         self.game = game
-        buttons = [
-            _button("Modifier", "settings", self._edit),
-            _button("Yamls", "yaml", self._yamls),
-            _button("Annuler la partie", "stopped", self._cancel, discord.ButtonStyle.danger),
-        ]
-        help_text = (
-            "**Modifier** : nom, date et description · **Yamls** : voir, retirer ou remplacer les yamls "
-            "de n'importe qui"
-        )
-        if can_host:
-            buttons.insert(0, _button("Lancer", "host", self._launch, discord.ButtonStyle.success))
-            help_text = (
-                f"**Lancer** : le bot génère la partie avec les yamls et apworlds du post, l'{E.host} héberge et la "
-                f"suit ici, logique déjà active · {help_text}"
-            )
         self.add_item(
             ui.Container(
                 ui.TextDisplay(f"### {E.settings} Gérer · {md(game.name)}"),
-                ui.ActionRow(*buttons),
-                ui.TextDisplay(f"-# {help_text}"),
+                ui.ActionRow(
+                    _button("Modifier", "settings", self._edit),
+                    _button("Yamls", "yaml", self._yamls),
+                    _button("Annuler la partie", "stopped", self._cancel, discord.ButtonStyle.danger),
+                ),
+                ui.TextDisplay(
+                    "-# **Modifier** : nom, date et description · **Yamls** : voir, retirer ou remplacer les yamls "
+                    "de n'importe qui"
+                ),
                 accent_colour=Tone.INFO.value,
             )
         )
-
-    async def _launch(self, interaction: "Interaction") -> None:
-        from .launch import LaunchModal  # launch needs rooms, which needs this module
-
-        interaction.client.hosting.check_available()
-        await interaction.response.send_modal(LaunchModal(self.game))
 
     async def _edit(self, interaction: "Interaction") -> None:
         await interaction.response.send_modal(EditGameModal(self.game, ZoneInfo(interaction.client.settings.timezone)))
@@ -355,5 +341,34 @@ class GameManageButton(ui.DynamicItem[ui.Button], template=r"archipelabot:game:(
         elif not can_organise(game, interaction.user.id, interaction.permissions):
             view = notice("Seule la personne qui a annoncé la partie (ou un modérateur) peut la gérer.", Tone.ERROR)
         else:
-            view = GameManageView(game, can_host=bool(interaction.client.settings.host_address))
+            view = GameManageView(game)
         await interaction.response.send_message(view=view, ephemeral=True)
+
+
+class LaunchButton(ui.DynamicItem[ui.Button], template=r"archipelabot:launch:(?P<game>\d+)"):
+    """On the sign-up post when the bot can host: generate the game and host it."""
+
+    def __init__(self, game_id: int) -> None:
+        super().__init__(
+            ui.Button(label="Lancer", emoji=E.partial("host"), style=discord.ButtonStyle.success,
+                      custom_id=f"archipelabot:launch:{game_id}")
+        )  # fmt: skip
+        self.game_id = game_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: "Interaction", item: ui.Button, match: re.Match[str]) -> "LaunchButton":
+        return cls(int(match["game"]))
+
+    async def callback(self, interaction: "Interaction") -> None:
+        from .launch import LaunchModal  # launch needs rooms, which needs this module
+
+        game = interaction.client.games.get(self.game_id)
+        if game is None:
+            text, tone = "Cette partie n'est plus en inscriptions.", Tone.WARNING
+        elif not can_organise(game, interaction.user.id, interaction.permissions):
+            text, tone = "Seule la personne qui a annoncé la partie (ou un modérateur) peut la lancer.", Tone.ERROR
+        else:
+            interaction.client.hosting.check_available()
+            await interaction.response.send_modal(LaunchModal(game))
+            return
+        await interaction.response.send_message(view=notice(text, tone), ephemeral=True)

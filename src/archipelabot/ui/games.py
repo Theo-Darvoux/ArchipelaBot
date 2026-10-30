@@ -36,7 +36,7 @@ from ..storage.apworlds import ApworldRepo
 from ..storage.games import GameRecord, GameRepo
 from ..storage.guilds import GuildConfig
 from .forum import RoomTag, ensure_room_tags
-from .manage import GameManageButton
+from .manage import GameManageButton, LaunchButton
 from .render.signup import Upload, conflict_text, signup_view
 from .rooms import RoomRuntime, ThreadSink
 from .signup_buttons import CheckButton, YamlButton, YamlsZipButton
@@ -173,6 +173,8 @@ class GameManager:
         buttons: list[ui.Item] = [YamlButton(game.id), YamlsZipButton(game.id)]
         if self.bot.settings.archipelago_path:
             buttons.append(CheckButton(game.id))
+        if self.bot.settings.host_address:
+            buttons.append(LaunchButton(game.id))
         buttons.append(GameManageButton(game.id))
         return signup_view(
             game,

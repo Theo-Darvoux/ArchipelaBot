@@ -181,7 +181,7 @@ class GameManager:
             missing=list(await self.missing(game, files, attached)),
             conflicts=await self.conflicts(game, [p for f in files for p in f.players], attached),
             track_command=self.bot.command_mention("track start"),
-            host_command=self.bot.command_mention("partie lancer") if self.bot.settings.host_address else None,
+            can_host=bool(self.bot.settings.host_address),
             ping_role_id=config.ping_role_id,
             buttons=buttons,
             can_check=bool(self.bot.settings.archipelago_path),

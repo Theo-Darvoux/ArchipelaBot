@@ -28,14 +28,14 @@ def help_pages(cmd: Callable[[str], str]) -> list[HelpPage]:
         "### Pour commencer\n"
         f"**1.** Un admin choisit les forums avec {cmd('config')}.\n"
         f"**2.** Quelqu'un annonce la partie avec {cmd('partie nouvelle')}, et chacun y envoie son yaml.\n"
-        f"**3.** {cmd('partie lancer')} (le bot génère et héberge) ou {cmd('track start')} avec le lien de la room.\n"
+        f"**3.** {E.settings} **Gérer** puis **Lancer** (le bot génère et héberge), ou {cmd('track start')} avec le "
+        "lien de la room.\n"
         f"**4.** Chacun clique sur {E.claim} **Je joue** sur le panneau.\n"
         "-# Les boutons ci-dessous détaillent chaque étape."
     )
     game = (
         f"## {E.signup} Organiser une partie\n"
         f"{cmd('partie nouvelle')} : annoncer la partie (nom, date, infos) ; le bot crée son post\n"
-        f"{cmd('partie lancer')} : le bot génère la partie et l'{E.host} héberge, logique déjà active\n"
         f"{cmd('track start')} : suivre une room générée ailleurs, avec son lien\n"
         f"{cmd('apworld envoyer')} : ajouter un apworld au serveur hors d'une partie\n"
         "### Dans le post d'inscriptions\n"
@@ -43,7 +43,8 @@ def help_pages(cmd: Callable[[str], str]) -> list[HelpPage]:
         f"officiel · {E.zip} **Tous les yamls** : le zip pour générer\n"
         f"Pour l'organisateur et les modérateurs : {E.reachable} **Vérifier** teste chaque yaml avec les apworlds de "
         "la partie, comme à la génération (options invalides, options inconnues) · "
-        f"{E.settings} **Gérer** : modifier la partie, corriger les yamls de n'importe qui, ou l'annuler\n"
+        f"{E.settings} **Gérer** : **Lancer** la partie (le bot la génère et l'{E.host} héberge, logique déjà "
+        "active), la modifier, corriger les yamls de n'importe qui, ou l'annuler\n"
         f"-# Sans inscriptions, {cmd('track start')} crée directement le post de la room."
     )
     room = (

@@ -27,10 +27,9 @@ pont de chat. Tous les checks vont dans un post à part, dans un forum de suivi 
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
 | `/config` | Toute la configuration du serveur sur un panneau, chaque réglage avec son menu (permission *Gérer le serveur*). **Forum des parties** : où chaque partie a son post. **Suivi complet** : le forum où chaque room a son suivi complet (items, morts, hints, release…), le post de la room ne gardant que le chat, les goals et les pings. **Récaps** : un salon où publier aussi les récaps. **Apworlds** : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties. **Annonces** : le rôle pingé quand une partie est annoncée et quand sa room ouvre. **Création des parties** : tous les membres ou les admins seulement |
-| Bouton **Gérer** du post d'inscriptions | **Modifier** la partie (nom, date, description), corriger les **Yamls** de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire), ou **Annuler la partie** (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
+| Bouton **Gérer** du post d'inscriptions | **Lancer** la partie (le bot la génère et l'héberge, voir plus bas ; seulement avec `HOST_ADDRESS`), **Modifier** la partie (nom, date, description), corriger les **Yamls** de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire), ou **Annuler la partie** (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
 | Bouton **Gérer** du panneau d'une room | **Reconnecter** (en changeant le mot de passe si besoin), **Logique** (envoyer le spoiler log de la génération : le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique, voir plus bas), **Apworlds** et **Yamls** (room lancée depuis une partie : corriger après coup ceux qui ont servi à générer, puis renvoyer le spoiler avec **Logique**), **Récap** (podium, chiffres, graphique, même une fois le suivi arrêté), **Arrêter** (avec ou sans récap, ou retour aux inscriptions après un mauvais lien), et ce qu'affiche le suivi complet. Réservé à qui a lancé le suivi et aux modérateurs |
 | `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
-| `/partie lancer [release] [collect] [remaining] [cout_hint] [mot_de_passe]` | Dans le post d'une partie en inscriptions : le bot génère la partie avec les yamls et apworlds du post, l'héberge lui-même et la suit dans ce post (voir plus bas). Réservé à qui l'a annoncée et aux modérateurs |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
 | `/recap` | Dans le post d'une room, même une fois le suivi arrêté : le récap (podium, chiffres, graphique). Qui a lancé le suivi et les modérateurs le publient dans le post ; pour les autres, il s'affiche en privé |
 | `/apworld envoyer fichier:<.apworld>` | Ajouter un apworld au serveur hors d'une partie : il est ensuite proposé dans les inscriptions et dans **Gérer** puis **Apworlds** |
@@ -86,7 +85,7 @@ Le bot supprime le message « a épinglé un message » qui suit l'épinglage du
 
 ## Héberger une partie
 
-À la place des étapes 2 et 3, `/partie lancer` dans le post : le bot génère la partie avec Archipelago (la version
+À la place des étapes 2 et 3, **Gérer** puis **Lancer** dans le post : le bot génère la partie avec Archipelago (la version
 installée la plus récente), à partir des yamls et apworlds du post, puis lance son serveur sur sa propre machine.
 Le post devient le suivi de la room, comme avec `/track start`, avec en plus :
 
@@ -95,10 +94,10 @@ Le post devient le suivi de la room, comme avec `/track start`, avec en plus :
   visible seulement par lui, les fichiers des slots qu'il joue (ou choisit un slot s'il n'en a pas) ;
 - les bloqués et checks en logique, actifs tout de suite (le bot a la seed, pas besoin de **Logique**).
 
-Les options de `/partie lancer` sont celles du serveur : `release` et `collect` (par défaut automatiques à
-l'objectif), `remaining` (après l'objectif), le coût des hints (10 %) et un mot de passe. Le serveur sauvegarde la
+La fenêtre de **Lancer** demande les options du serveur : release et collect (par défaut automatiques à
+l'objectif), remaining (après l'objectif), le coût des hints (10 %) et un mot de passe. Le serveur sauvegarde la
 partie dans `data/hosted/`, redémarre avec le bot et s'il plante, et s'arrête avec le suivi (**Gérer** puis **Arrêter**, fin de
-partie, ou 7 jours sans check). Revenir aux inscriptions supprime la seed. Avant de générer, `/partie lancer` fait
+partie, ou 7 jours sans check). Revenir aux inscriptions supprime la seed. Avant de générer, **Lancer** fait
 la même vérification que **Vérifier** et refuse de lancer s'il reste une valeur refusée.
 
 Côté bot : Archipelago installé (comme pour la logique), `HOST_ADDRESS` dans le `.env` (le nom ou l'IP de la machine

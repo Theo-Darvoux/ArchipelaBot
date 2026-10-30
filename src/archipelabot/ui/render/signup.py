@@ -111,7 +111,7 @@ def signup_view(
     files: Sequence[YamlFile],
     *,
     track_command: str = "`/track start`",
-    host_command: str | None = None,
+    can_host: bool = False,
     ping_role_id: int | None = None,
     buttons: list[ui.Item] | None = None,
     can_check: bool = False,
@@ -147,10 +147,10 @@ def signup_view(
             "(options invalides qui la feraient échouer, options inconnues de l'apworld) · " + organiser
         )
     steps += f"\n-# Pour l'organisateur et les modérateurs · {organiser}."
-    if host_command:
+    if can_host:
         steps += (
-            f"\n-# Ou, à la place des étapes 2 et 3, {host_command} : le bot génère la partie et l'{E.host} héberge "
-            f"lui-même. Chacun récupère alors son {E.patch} patch sur le panneau."
+            f"\n-# Ou, à la place des étapes 2 et 3, {E.settings} **Gérer** puis **Lancer** : le bot génère la partie "
+            f"et l'{E.host} héberge lui-même. Chacun récupère alors son {E.patch} patch sur le panneau."
         )
     apworlds_text = apworlds_section(apworlds, missing, conflicts) if apworlds or missing or conflicts else ""
 

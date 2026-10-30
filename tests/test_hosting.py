@@ -22,9 +22,9 @@ from archipelabot.ui.panel_buttons import PatchButton
 from archipelabot.ui.rooms import RoomManager
 
 from .ap_server import AP_DIR, DEV_DIR, free_port, requires_ap_server
-from .fakes import FakeAttachment, FakeInteraction, FakeUser, button_labels, view_text
-from .test_games import click, game  # noqa: F401
-from .test_track_cog import discord_env, wait_until  # noqa: F401
+from .fakes import FakeAttachment, FakeInteraction, button_labels, view_text
+from .test_games import click, game, game_manage  # noqa: F401
+from .test_track_cog import buttons_of, discord_env, wait_until  # noqa: F401
 
 CAROL = ConnectOptions(slot="Carol", game="ChecksFinder", tags=(), items_handling=0b111, uuid="carol")
 
@@ -75,20 +75,30 @@ async def test_hosting_is_stored(db):
     assert await repo.hosted_ports() == []
 
 
+async def launch_modal(bot, record):
+    view = await game_manage(bot, record)
+    interaction = click(bot)
+    await buttons_of(view)["Lancer"].callback(interaction)
+    return interaction.response.sent[0]["modal"]
+
+
 async def test_hosting_needs_an_address(bot, game):  # noqa: F811
-    _, thread = game
-    cog = bot.get_cog("partie")
-    interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id)
-    with pytest.raises(UserError, match="HOST_ADDRESS"):
-        await cog.host.callback(cog, interaction)
-    assert "partie lancer" not in view_text(await bot.games.render(bot.games.by_thread(thread.id)))
+    record, thread = game
+    assert "Lancer" not in buttons_of(await game_manage(bot, record))
+    assert "**Lancer**" not in view_text(await bot.games.render(record))
     bot.settings.host_address = "play.example"
-    assert "`/partie lancer` : le bot génère" in view_text(await bot.games.render(bot.games.by_thread(thread.id)))
-    stranger = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=FakeUser(id=5))
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.host.callback(cog, stranger)
+    assert "**Gérer** puis **Lancer** : le bot génère" in view_text(await bot.games.render(record))
+    assert "Seule la personne" in view_text(await game_manage(bot, record, user=5))
+
+    modal = await launch_modal(bot, record)
+    modal.to_components()
+    assert [o.value for o in modal.release.options if o.default] == ["auto"]
+    modal.hint_cost._value = "150"
+    with pytest.raises(UserError, match="de 0 à 100"):
+        await modal.on_submit(click(bot, guild=thread.parent.guild))
+    modal.hint_cost._value = "10"
     with pytest.raises(UserError, match="Personne n'a encore envoyé"):
-        await cog.host.callback(cog, interaction)
+        await modal.on_submit(click(bot, guild=thread.parent.guild))
 
 
 @pytest.fixture
@@ -101,10 +111,15 @@ def hosting_bot(bot, tmp_path):
     return bot
 
 
-async def host(bot, thread, **options) -> FakeInteraction:
-    cog = bot.get_cog("partie")
-    interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id)
-    await cog.host.callback(cog, interaction, **options)
+async def host(bot, thread, cout_hint=10, mot_de_passe="", release="auto") -> FakeInteraction:
+    modal = await launch_modal(bot, bot.games.by_thread(thread.id))
+    for select in (modal.release, modal.collect, modal.remaining):
+        select._values = [next(o.value for o in select.options if o.default)]
+    modal.release._values = [release]
+    modal.hint_cost._value = str(cout_hint)
+    modal.password._value = mot_de_passe
+    interaction = click(bot, guild=thread.parent.guild)
+    await modal.on_submit(interaction)
     return interaction
 
 

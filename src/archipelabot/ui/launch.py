@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import discord
+from discord import ui
 
 from ..ap.client import APConnectionError, APRefused
 from ..ap.webhost import WebhostError, is_web_link, parse_room_url
@@ -13,7 +14,7 @@ from ..core.room import RoomTracker
 from ..errors import UserError
 from ..storage.games import GameRecord
 from ..storage.rooms import RoomRecord
-from .components import Tone, notice
+from .components import Modal, Tone, notice
 from .emojis import E
 from .forum import RoomTag, ensure_room_tags
 from .render.panel import panel_view
@@ -21,6 +22,7 @@ from .rooms import RoomRuntime, ThreadSink
 
 if TYPE_CHECKING:
     from ..bot import ArchipelaBot
+    from .types import Interaction
 
 log = logging.getLogger(__name__)
 
@@ -212,3 +214,69 @@ async def _announce(runtime: RoomRuntime, participants: list[int]) -> None:
         await runtime.sink.send_view(notice(text, Tone.SUCCESS), allowed_mentions=allowed)
     except discord.HTTPException:
         log.warning("Could not announce the opening of room %s", runtime.record.id, exc_info=True)
+
+
+MODES = [
+    ("automatique à l'objectif", "auto"),
+    ("automatique à l'objectif, et à la demande", "auto-enabled"),
+    ("à la demande, après l'objectif", "goal"),
+    ("à la demande, à tout moment", "enabled"),
+    ("jamais", "disabled"),
+]
+REMAINING = [("après l'objectif", "goal"), ("à tout moment", "enabled"), ("jamais", "disabled")]
+
+
+def _choice(choices: list[tuple[str, str]], default: str) -> ui.Select:
+    return ui.Select(
+        options=[discord.SelectOption(label=name, value=value, default=value == default) for name, value in choices]
+    )
+
+
+def _picked(select: ui.Select) -> str:
+    return select.values[0] if select.values else next(o.value for o in select.options if o.default)
+
+
+class LaunchModal(Modal):
+    """The server's options, then generation and hosting on the bot's machine."""
+
+    def __init__(self, game: GameRecord) -> None:
+        super().__init__(title="Lancer la partie", timeout=900)
+        self.game = game
+        defaults = ServerOptions()
+        self.release = _choice(MODES, defaults.release_mode)
+        self.collect = _choice(MODES, defaults.collect_mode)
+        self.remaining = _choice(REMAINING, defaults.remaining_mode)
+        self.hint_cost = ui.TextInput(default=str(defaults.hint_cost), max_length=3)
+        self.password = ui.TextInput(placeholder="Vide : pas de mot de passe", required=False, max_length=64)
+        for text, description, component in (
+            ("Release", "Quand les items restants d'un joueur sont envoyés aux autres", self.release),
+            ("Collect", "Quand un joueur récupère ses items restants chez les autres", self.collect),
+            ("Remaining", "Quand !remaining liste les items restants", self.remaining),
+            ("Coût d'un hint", "En % des checks du joueur, de 0 à 100", self.hint_cost),
+            ("Mot de passe", "Pour rejoindre la partie", self.password),
+        ):
+            self.add_item(ui.Label(text=text, description=description, component=component))
+
+    def options(self) -> ServerOptions:
+        cost = self.hint_cost.value.strip().rstrip("%").strip()
+        if not cost.isdigit() or not 0 <= int(cost) <= 100:
+            raise UserError("Le coût d'un hint est un pourcentage, de 0 à 100.")
+        return ServerOptions(_picked(self.release), _picked(self.collect), _picked(self.remaining), int(cost))
+
+    async def on_submit(self, interaction: "Interaction") -> None:
+        bot = interaction.client
+        options = self.options()
+        bot.hosting.check_available()
+        guild = interaction.guild
+        assert guild is not None
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        runtime, warnings = await host_game(bot, guild, self.game, options, self.password.value.strip() or None)
+        text = (
+            f"{E.host} Partie générée et hébergée · {len(runtime.tracker.state.players)} joueurs\n"
+            f"Pour jouer : `{runtime.play_address}`\n"
+            "-# Les bloqués et les checks en logique sont déjà actifs. Le serveur s'arrête avec le suivi "
+            f"({E.settings} **Gérer** puis **Arrêter** sur le panneau)."
+        )
+        if warnings:
+            text += "\n⚠️ Options inconnues des apworlds, ignorées :\n" + "\n".join(f"- {w}" for w in warnings[:10])
+        await interaction.followup.send(view=notice(text, Tone.WARNING if warnings else Tone.SUCCESS), ephemeral=True)

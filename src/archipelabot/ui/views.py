@@ -26,7 +26,7 @@ SETTING_TOGGLES: list[tuple[str, str, str, str]] = [
     ("show_deaths", "death", "Morts DeathLink", ""),
     ("show_hints", "hint", "Nouveaux hints", ""),
     ("show_joins", "online", "Connexions et déconnexions", ""),
-    ("chat_bridge", "chat", "Chat Bridge", "Bridge entre le chat discord et la room."),
+    ("chat_bridge", "chat", "Chat Bridge", "Bridge entre le post de la room et le chat du jeu."),
 ]
 
 
@@ -40,7 +40,12 @@ class SettingsView(ui.LayoutView):
 
     def _build(self) -> None:
         self.clear_items()
-        container = ui.Container(ui.TextDisplay(f"### {E.settings} Réglages · {md(self.room_name)}"))
+        container = ui.Container(
+            ui.TextDisplay(
+                f"### {E.settings} Réglages · {md(self.room_name)}\n-# Ce qui s'affiche dans le suivi complet ; "
+                "le post de la room ne garde que le chat, les goals et les pings."
+            )
+        )
         for name, icon, label, help_text in SETTING_TOGGLES:
             enabled = getattr(self.settings, name)
             text = f"{E.get(icon)} **{label}**" + (f"\n-# {help_text}" if help_text else "")

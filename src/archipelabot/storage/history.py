@@ -17,6 +17,16 @@ class LoggedEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class LoggedItem:
+    at: datetime
+    finder: int
+    receiver: int
+    item: str
+    location: str
+    flags: int
+
+
+@dataclass(frozen=True, slots=True)
 class SavedSlot:
     slot: int
     name: str
@@ -57,6 +67,23 @@ class HistoryRepo:
         ) as cur:
             rows = await cur.fetchall()
         return [LoggedEvent(_utc(r["at"]), r["kind"], r["slot"], json.loads(r["data"])) for r in rows]
+
+    async def log_items(self, room_id: int, items: list[LoggedItem]) -> None:
+        await self.db.conn.executemany(
+            "INSERT INTO room_item (room_id, at, finder, receiver, item, location, flags) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(room_id, i.at.isoformat(), i.finder, i.receiver, i.item, i.location, i.flags) for i in items],
+        )
+        await self.db.conn.commit()
+
+    async def items(self, room_id: int) -> list[LoggedItem]:
+        async with self.db.conn.execute(
+            "SELECT at, finder, receiver, item, location, flags FROM room_item WHERE room_id = ? ORDER BY at, id",
+            (room_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            LoggedItem(_utc(r["at"]), r["finder"], r["receiver"], r["item"], r["location"], r["flags"]) for r in rows
+        ]
 
     async def snapshot(self, room_id: int, snapshots: list[Snapshot]) -> None:
         await self.db.conn.executemany(

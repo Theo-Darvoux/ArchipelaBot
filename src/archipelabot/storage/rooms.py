@@ -44,6 +44,7 @@ class RoomRecord:
     password: str | None = None
     webhost: WebhostRoom | None = None
     thread_id: int | None = None
+    log_thread_id: int | None = None
     panel_message_id: int | None = None
     settings: RoomSettings = field(default_factory=RoomSettings)
     status: RoomStatus = "active"
@@ -86,6 +87,10 @@ class RoomRepo:
         rows = await self._select("WHERE thread_id = ?", thread_id)
         return rows[0] if rows else None
 
+    async def by_log_thread(self, thread_id: int) -> RoomRecord | None:
+        rows = await self._select("WHERE log_thread_id = ?", thread_id)
+        return rows[0] if rows else None
+
     async def hosted_ports(self) -> list[int]:
         query = "SELECT host_port FROM room WHERE host_port IS NOT NULL AND status = 'active'"
         async with self.db.conn.execute(query) as cur:
@@ -99,6 +104,9 @@ class RoomRepo:
 
     async def save_address(self, room: RoomRecord) -> None:
         await self._update(room, "address = ?", room.address)
+
+    async def save_log_thread(self, room: RoomRecord) -> None:
+        await self._update(room, "log_thread_id = ?", room.log_thread_id)
 
     async def save_password(self, room: RoomRecord) -> None:
         await self._update(room, "password = ?", room.password)
@@ -136,6 +144,7 @@ class RoomRepo:
                 id=row["id"],
                 guild_id=row["guild_id"],
                 thread_id=row["thread_id"],
+                log_thread_id=row["log_thread_id"],
                 panel_message_id=row["panel_message_id"],
                 name=row["name"],
                 address=row["address"],

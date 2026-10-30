@@ -36,22 +36,22 @@ from ..core.room import AddressResolver, RoomState, RoomTracker, SlotInfo, Waker
 from ..errors import UserError
 from ..recap.chart import render_chart
 from ..recap.stats import Recap, build_recap
-from ..storage.claims import ClaimRepo, NotifMode, NotifPrefs
+from ..storage.claims import ClaimRepo, NotifPrefs
 from ..storage.history import HistoryRepo
+from ..storage.pings import ItemPing, PingRepo
 from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
 from .components import Tone, notice
 from .emojis import E
 from .forum import TAG_SPECS, Post, RoomTag, ensure_room_tags
 from .panel_buttons import ClaimButton, MyHintsButton, PatchButton, SettingsButton
-from .render.feed import feed_view
+from .render.feed import chat_event, feed_view, log_header, render_event
 from .render.panel import panel_view
 from .render.recap import CHART_FILENAME, recap_view
 from .render.text import md, plural
 from .services.feed import FeedMessage, FeedService
 from .services.logic import LogicService
-from .services.notify import NotifyService
 from .services.panel import PanelService
-from .services.presence import Presence
+from .services.pings import PingService
 from .services.progress import BaselineFetcher, ProgressService, restore_progress
 from .views import SettingsView
 
@@ -80,8 +80,30 @@ CONNECTION_TAGS = {
 }
 
 
+def slot_named(state: RoomState, name: str) -> int:
+    wanted = name.strip().casefold()
+    for info in state.players:
+        if wanted in (info.name.casefold(), info.display.casefold()):
+            return info.slot
+    raise UserError(f"Aucun joueur nommé **{md(name)}** dans cette room.")
+
+
 def can_manage(record: RoomRecord, user_id: int, permissions: discord.Permissions) -> bool:
     return user_id == record.created_by or permissions.manage_threads
+
+
+async def open_post(bot: "ArchipelaBot", thread_id: int) -> discord.Thread:
+    channel = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+    if channel.type != discord.ChannelType.public_thread:
+        raise TypeError(f"channel {thread_id} is not a forum post")
+    if channel.archived:  # type: ignore[union-attr]
+        # Messages of an archived post can't be edited: posts archive after a week without messages.
+        await channel.edit(archived=False)  # type: ignore[union-attr]
+    return channel  # type: ignore[return-value]
+
+
+def post_url(guild_id: int, thread_id: int) -> str:
+    return f"https://discord.com/channels/{guild_id}/{thread_id}"
 
 
 class ThreadSink:
@@ -93,22 +115,15 @@ class ThreadSink:
         self.on_gone = on_gone
 
     async def thread(self) -> discord.Thread:
-        thread_id = self.record.thread_id
         try:
-            channel = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+            return await open_post(self.bot, self.record.thread_id)  # type: ignore[arg-type]
         except discord.NotFound:
             self.on_gone()
             raise
-        if channel.type != discord.ChannelType.public_thread:
-            raise TypeError(f"channel {thread_id} is not a forum post")
-        if channel.archived:  # type: ignore[union-attr]
-            # Messages of an archived post can't be edited: posts archive after a week without messages.
-            await channel.edit(archived=False)  # type: ignore[union-attr]
-        return channel  # type: ignore[return-value]
 
     @property
     def jump_url(self) -> str:
-        return f"https://discord.com/channels/{self.record.guild_id}/{self.record.thread_id}"
+        return post_url(self.record.guild_id, self.record.thread_id)  # type: ignore[arg-type]
 
     async def send_lines(self, message: FeedMessage) -> None:
         allowed = discord.AllowedMentions(users=[discord.Object(user) for user in message.mentions])
@@ -141,6 +156,47 @@ class ThreadSink:
             await thread.edit(applied_tags=tags[:5])
 
 
+class LogSink:
+    """The room's post in the full log forum, created with its first lines; nothing without that forum."""
+
+    def __init__(
+        self, bot: "ArchipelaBot", record: RoomRecord, repo: RoomRepo, on_created: Callable[[], None] = lambda: None
+    ) -> None:
+        self.bot = bot
+        self.record = record
+        self.repo = repo
+        self.on_created = on_created
+
+    async def thread(self) -> discord.Thread | None:
+        if self.record.log_thread_id is not None:
+            try:
+                return await open_post(self.bot, self.record.log_thread_id)
+            except discord.NotFound:
+                self.record.log_thread_id = None
+        config = await self.bot.guild_configs.get(self.record.guild_id)
+        forum = self.bot.get_channel(config.log_forum_id) if config.log_forum_id else None
+        if forum is None or forum.type != discord.ChannelType.forum:
+            return None
+        created = await forum.create_thread(  # type: ignore[union-attr]
+            name=self.record.name,
+            view=log_header(self.record.name, self.record.thread_id),
+            auto_archive_duration=10080,
+            reason="Suivi complet d'une room",
+        )
+        self.record.log_thread_id = created.thread.id
+        await self.repo.save_log_thread(self.record)
+        self.on_created()
+        return created.thread
+
+    async def send_lines(self, message: FeedMessage) -> None:
+        if thread := await self.thread():
+            await thread.send(view=feed_view(list(message.lines)), allowed_mentions=discord.AllowedMentions.none())
+
+    async def send_view(self, view: ui.LayoutView) -> None:
+        if thread := await self.thread():
+            await thread.send(view=view, allowed_mentions=discord.AllowedMentions.none())
+
+
 @dataclass(eq=False)
 class RoomRuntime:
     record: RoomRecord
@@ -148,10 +204,12 @@ class RoomRuntime:
     sink: ThreadSink
     repo: RoomRepo
     claim_repo: ClaimRepo
+    ping_repo: PingRepo
     prefs: NotifPrefs
     history: HistoryRepo
     fetch_baseline: BaselineFetcher
     claims: dict[int, int] = field(default_factory=dict)  # slot -> Discord user
+    watched: set[ItemPing] = field(default_factory=set)
     tasks: list[asyncio.Task] = field(default_factory=list)
     on_everyone_finished: Callable[[], None] = lambda: None
     has_patches: bool = False
@@ -167,17 +225,20 @@ class RoomRuntime:
             self._progress_changed,
             periodic=self.record.webhost is not None,
         )
-        self.presence = Presence(self.tracker.state)
+        state = self.tracker.state
+        self.log_sink = LogSink(self.sink.bot, self.record, self.repo, on_created=lambda: self.panel.request_update())
         self.feed = FeedService(
-            self.tracker.state, lambda: self.record.settings, self.sink, ping=self.ping_target, presence=self.presence
+            state.address, lambda e: chat_event(e, state, self.record.settings), self.sink, connections=True
         )
-        self.notify = NotifyService(
-            self.tracker.state,
+        self.log = FeedService(state.address, lambda e: render_event(e, state, self.record.settings), self.log_sink)
+        self.pings = PingService(
+            state,
+            self.watchers,
+            self.prefs.mode,
+            lambda user, slot: self.claims.get(slot) == user,
+            self.sink,
             lambda: self.record.name,
             lambda: self.sink.jump_url,
-            self.dm_target,
-            self.sink,
-            presence=self.presence,
         )
         self.panel = PanelService(self.render_panel, self.sink.edit_panel)
         self.chat = ChatRelay(self.tracker, self.record.password)
@@ -197,15 +258,31 @@ class RoomRuntime:
         last = self.progress_service.last_activity or self.record.created_at
         return (now or datetime.now(UTC)) - last >= ABANDONED_AFTER
 
-    def _claimant_with_mode(self, slot: int, mode: NotifMode) -> int | None:
-        user = self.claims.get(slot)
-        return user if user is not None and self.prefs.mode(user) == mode else None
+    def watchers(self, item: ev.ItemSent) -> list[int]:
+        return sorted({p.user_id for p in self.watched if p.slot == item.receiver and p.item == item.item})
 
-    def ping_target(self, slot: int) -> int | None:
-        return self._claimant_with_mode(slot, NotifMode.THREAD)
+    def item_names(self, slot: int) -> list[str]:
+        return self.tracker.datapackages.item_names(self.tracker.state.game(slot))
 
-    def dm_target(self, slot: int) -> int | None:
-        return self._claimant_with_mode(slot, NotifMode.DM)
+    def item_named(self, slot: int, name: str) -> str | None:
+        """The item's exact name in this slot's game; any name when the bot doesn't know the game's items."""
+        names = self.item_names(slot)
+        if not names:
+            return name.strip()
+        wanted = name.strip().casefold()
+        return next((n for n in names if n.casefold() == wanted), None)
+
+    async def watch(self, ping: ItemPing) -> None:
+        self.watched.add(ping)
+        await self.ping_repo.add(self.record.id, ping)  # type: ignore[arg-type]
+
+    async def unwatch(self, ping: ItemPing) -> None:
+        self.watched.discard(ping)
+        await self.ping_repo.remove(self.record.id, ping)  # type: ignore[arg-type]
+
+    @property
+    def log_url(self) -> str | None:
+        return post_url(self.record.guild_id, self.record.log_thread_id) if self.record.log_thread_id else None
 
     @property
     def active(self) -> bool:
@@ -227,6 +304,7 @@ class RoomRuntime:
             logic=self.logic.results if self.active else None,
             page_url=webhost.page_url if webhost else None,
             address=self.play_address,
+            log_url=self.log_url,
             buttons=self._buttons(*self._button_kinds()) if buttons else None,
         )
 
@@ -250,11 +328,7 @@ class RoomRuntime:
         return SettingsView(self.record.name, self.record.settings.model_copy(), save)
 
     def slot_named(self, name: str) -> int:
-        wanted = name.strip().casefold()
-        for info in self.tracker.state.players:
-            if wanted in (info.name.casefold(), info.display.casefold()):
-                return info.slot
-        raise UserError(f"Aucun joueur nommé **{md(name)}** dans cette room.")
+        return slot_named(self.tracker.state, name)
 
     async def claim(self, slot: int, user_id: int, *, force: bool = False) -> None:
         owner = self.claims.get(slot)
@@ -286,11 +360,16 @@ class RoomRuntime:
             self.logic.results if self.active else None,
         )
 
+    async def flush(self) -> None:
+        await self.feed.flush()
+        await self.log.flush()
+        await self.pings.flush()
+
     async def on_event(self, event: ev.Event) -> None:
         await self.progress_service.handle(event)
-        await self.presence.handle(event)
         await self.feed.handle(event)
-        await self.notify.handle(event)
+        await self.log.handle(event)
+        await self.pings.handle(event)
         if isinstance(event, ev.GoalReached | ev.ClientStatusChanged) and self.everyone_finished:
             self.on_everyone_finished()
         if isinstance(event, ev.ConnectionChanged):
@@ -313,6 +392,7 @@ class RoomManager:
         self.bot = bot
         self.repo = RoomRepo(bot.db)
         self.claim_repo = ClaimRepo(bot.db)
+        self.ping_repo = PingRepo(bot.db)
         self.history = HistoryRepo(bot.db)
         self._stopping: dict[int, asyncio.Task[None]] = {}
         self._rooms: dict[int, RoomRuntime] = {}
@@ -323,6 +403,11 @@ class RoomManager:
 
     def by_thread(self, thread_id: int | None) -> RoomRuntime | None:
         return next((r for r in self._rooms.values() if r.record.thread_id == thread_id), None)
+
+    def by_log_thread(self, thread_id: int | None) -> RoomRuntime | None:
+        if thread_id is None:
+            return None
+        return next((r for r in self._rooms.values() if r.record.log_thread_id == thread_id), None)
 
     def find_duplicate(self, guild_id: int, record: RoomRecord) -> RoomRuntime | None:
         for runtime in self._rooms.values():
@@ -377,10 +462,12 @@ class RoomManager:
             sink=ThreadSink(self.bot, record, on_gone=lambda: self._later(record.id, self._forget)),
             repo=self.repo,
             claim_repo=self.claim_repo,
+            ping_repo=self.ping_repo,
             prefs=self.bot.notif_prefs,
             history=self.history,
             fetch_baseline=self._baseline_fetcher(record, tracker),
             claims=await self.claim_repo.for_room(record.id),
+            watched=await self.ping_repo.for_room(record.id),
         )
         if record.hosting:
             runtime.has_patches = bool(await asyncio.to_thread(slot_files, self.bot.hosting.folder(record.hosting)))
@@ -389,7 +476,8 @@ class RoomManager:
         runtime.tasks = [
             asyncio.create_task(runtime.progress_service.run(), name=f"progress {record.id}"),
             asyncio.create_task(runtime.feed.run(), name=f"feed {record.id}"),
-            asyncio.create_task(runtime.notify.run(), name=f"notify {record.id}"),
+            asyncio.create_task(runtime.log.run(), name=f"log {record.id}"),
+            asyncio.create_task(runtime.pings.run(), name=f"pings {record.id}"),
             asyncio.create_task(runtime.panel.run(), name=f"panel {record.id}"),
             asyncio.create_task(runtime.chat.run(), name=f"chat {record.id}"),
             asyncio.create_task(runtime.logic.run(), name=f"logic {record.id}"),
@@ -577,7 +665,7 @@ class RoomManager:
         task.add_done_callback(lambda _: self._stopping.pop(room_id, None))
 
     async def _finish(self, runtime: RoomRuntime) -> None:
-        await runtime.feed.flush()
+        await runtime.flush()
         try:
             await self.publish_recap(runtime, announce=True)
         except Exception:
@@ -693,7 +781,7 @@ class RoomManager:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await runtime.logic.close()
-        for flush in (runtime.feed.flush, runtime.notify.flush, runtime.progress_service.snapshot):
+        for flush in (runtime.flush, runtime.progress_service.snapshot):
             try:
                 await flush()
             except Exception:

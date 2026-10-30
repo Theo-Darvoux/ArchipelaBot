@@ -140,13 +140,14 @@ def panel_view(
     logic: dict[int, SlotLogic] | None = None,
     page_url: str | None = None,
     address: str | None = None,
+    log_url: str | None = None,
     buttons: list[ui.Item] | None = None,
 ) -> ui.LayoutView:
     title = f"## [{md(name)}]({page_url})" if page_url else f"## {md(name)}"
     status = (
         f"{summary_line(state, progress, logic)}\n"
         f"-# {connection_label(state.connection)} · {address or state.address} · "
-        f"suivi depuis {discord.utils.format_dt(since, 'R')}"
+        f"suivi depuis {discord.utils.format_dt(since, 'R')}" + (f" · [suivi complet]({log_url})" if log_url else "")
     )
     players = roster(state, progress, claims or {}, logic or {}) or "*Aucun joueur*"
 

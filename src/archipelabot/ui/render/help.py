@@ -10,8 +10,8 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
     intro = (
         f"## {E.info} ArchipelaBot\n"
         "Le bot suit vos parties [Archipelago](https://archipelago.gg) sur Discord. Chaque room suivie a son post "
-        "dans le forum, avec un panneau de progression de tous les joueurs, le fil des items envoyés et le chat "
-        "de la partie."
+        "dans le forum, avec un panneau de progression de tous les joueurs et le chat de la partie ; tous les "
+        "checks vont dans son suivi complet, un post à part en lecture seule."
     )
     start = (
         "### Pour commencer\n"
@@ -35,7 +35,9 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
         f"{cmd('status')} : ta progression détaillée, ou celle d'un autre joueur\n"
         f"{cmd('hints')} : tes hints, visibles seulement par toi\n"
         f"{cmd('claim')} · {cmd('unclaim')} : indiquer ou libérer ton slot\n"
-        f"{cmd('track reglages')} : choisir ce qui s'affiche dans le fil\n"
+        f"{cmd('ping')} : être prévenu quand ton slot reçoit un item précis (vide : voir et retirer tes pings)\n"
+        f"{cmd('historique')} : tout ce qui s'est passé dans la room, ou pour un joueur, avec export .txt\n"
+        f"{cmd('track reglages')} : choisir ce qui s'affiche dans le suivi complet\n"
         f"{cmd('track reconnect')} : relancer la connexion (ou changer le mot de passe)\n"
         f"{cmd('track logique')} : avec le spoiler log, le panneau montre qui est {E.blocked} bloqué et combien de "
         "checks chacun peut faire (partie lancée depuis son post d'inscriptions)\n"
@@ -49,13 +51,14 @@ def help_view(cmd: Callable[[str], str]) -> ui.LayoutView:
     )
     notifs = (
         f"### {E.notif_thread} Notifications\n"
-        "Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot te mentionne dans le post, "
-        f"une fois par absence. {cmd('notifs')} pour recevoir ça en DM, ou plus du tout."
+        f"Le bot ne mentionne personne pour les items, sauf ceux demandés avec {cmd('ping')}. "
+        f"{cmd('notifs')} pour recevoir ces pings en DM, ou plus du tout."
     )
     admin = (
         f"### {E.settings} Admins\n"
-        f"{cmd('config forum')} · {cmd('config recap')} · {cmd('config annonces')} · {cmd('config apworlds')} · "
-        f"{cmd('config creation')} · {cmd('config voir')}\n"
+        f"{cmd('config forum')} · {cmd('config suivi')} · {cmd('config recap')} · {cmd('config annonces')} · "
+        f"{cmd('config apworlds')} · {cmd('config creation')} · {cmd('config voir')}\n"
+        f"-# {cmd('config suivi')} : le forum en lecture seule où chaque room a son suivi complet.\n"
         "-# Le salon d'apworlds : le bot reprend ceux qui y sont postés, et les propose ensuite dans les parties.\n"
         f"-# {cmd('config creation')} : réserver aux admins la création de parties, ou l'ouvrir à tous.\n"
         "-# Réservé à la permission *Gérer le serveur*."

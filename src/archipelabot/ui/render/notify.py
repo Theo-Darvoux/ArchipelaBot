@@ -15,7 +15,8 @@ def received_items_view(
     room_name: str, items: list[ev.ItemSent], state: RoomState, jump_url: str | None
 ) -> ui.LayoutView:
     lines = [
-        f"{item_emoji(i.flags)} **{md(i.item)}** de {md(state.name(i.finder))} · *{md(i.location)}*"
+        f"{item_emoji(i.flags)} **{md(i.item)}** pour {md(state.name(i.receiver))} · de {md(state.name(i.finder))}"
+        f" · *{md(i.location)}*"
         for i in items[:MAX_DM_ITEMS]
     ]
     if len(items) > MAX_DM_ITEMS:

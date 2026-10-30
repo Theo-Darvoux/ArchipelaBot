@@ -11,6 +11,7 @@ class GuildConfig:
     ping_role_id: int | None = None
     apworld_channel_id: int | None = None
     admin_only_games: bool = False
+    log_forum_id: int | None = None
 
 
 class GuildRepo:
@@ -19,7 +20,8 @@ class GuildRepo:
 
     async def get(self, guild_id: int) -> GuildConfig:
         async with self.db.conn.execute(
-            "SELECT forum_id, recap_channel_id, ping_role_id, apworld_channel_id, admin_only_games FROM guild_config "
+            "SELECT forum_id, recap_channel_id, ping_role_id, apworld_channel_id, admin_only_games, log_forum_id "
+            "FROM guild_config "
             "WHERE guild_id = ?",
             (guild_id,),
         ) as cur:
@@ -33,18 +35,20 @@ class GuildRepo:
             row["ping_role_id"],
             row["apworld_channel_id"],
             bool(row["admin_only_games"]),
+            row["log_forum_id"],
         )
 
     async def save(self, config: GuildConfig) -> None:
         await self.db.conn.execute(
             """
             INSERT INTO guild_config
-                (guild_id, forum_id, recap_channel_id, ping_role_id, apworld_channel_id, admin_only_games)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (guild_id, forum_id, recap_channel_id, ping_role_id, apworld_channel_id, admin_only_games,
+                 log_forum_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (guild_id) DO UPDATE
                 SET forum_id = excluded.forum_id, recap_channel_id = excluded.recap_channel_id,
                     ping_role_id = excluded.ping_role_id, apworld_channel_id = excluded.apworld_channel_id,
-                    admin_only_games = excluded.admin_only_games
+                    admin_only_games = excluded.admin_only_games, log_forum_id = excluded.log_forum_id
             """,
             (
                 config.guild_id,
@@ -53,6 +57,7 @@ class GuildRepo:
                 config.ping_role_id,
                 config.apworld_channel_id,
                 config.admin_only_games,
+                config.log_forum_id,
             ),
         )
         await self.db.conn.commit()

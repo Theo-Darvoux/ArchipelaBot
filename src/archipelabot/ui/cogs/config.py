@@ -15,6 +15,14 @@ if TYPE_CHECKING:
     from ...bot import ArchipelaBot
 
 APWORLD_PERMISSIONS = ("view_channel", "read_message_history", "add_reactions")
+LOG_PERMISSIONS = (
+    "view_channel",
+    "send_messages",
+    "create_public_threads",
+    "send_messages_in_threads",
+    "manage_threads",
+    "read_message_history",
+)
 
 
 @app_commands.guild_only()
@@ -44,6 +52,28 @@ class ConfigCog(
             view=notice(f"Les rooms suivies seront postées dans {salon.mention}.\n-# Tags : {tags}", Tone.SUCCESS),
             ephemeral=True,
         )
+
+    @app_commands.command(name="suivi", description="Choisir le forum où chaque room a son suivi complet")
+    @app_commands.describe(salon="Un forum en lecture seule pour les membres · vide : plus de suivi complet")
+    async def set_log_forum(self, interaction: Interaction, salon: discord.ForumChannel | None = None) -> None:
+        if salon is not None:
+            granted = salon.permissions_for(salon.guild.me)
+            if missing := [p for p in LOG_PERMISSIONS if not getattr(granted, p)]:
+                raise UserError(
+                    f"Il me manque des permissions dans {salon.mention} : " + ", ".join(f"`{p}`" for p in missing)
+                )
+        config = await self.bot.guild_configs.get(interaction.guild_id)
+        config.log_forum_id = salon.id if salon else None
+        await self.bot.guild_configs.save(config)
+        if salon:
+            text = (
+                f"Chaque room aura son suivi complet (tous les checks, morts, hints…) dans {salon.mention}. Le post "
+                "de la room garde le chat, les goals et les pings.\n-# Pour le mettre en lecture seule, retire aux "
+                "membres *Envoyer des messages* et *Envoyer des messages dans les fils* sur ce forum."
+            )
+        else:
+            text = "Plus de suivi complet : seuls `/historique` et le post de la room restent."
+        await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
 
     @app_commands.command(name="recap", description="Choisir un salon où publier aussi les récaps de fin de partie")
     @app_commands.describe(salon="Laisser vide pour publier les récaps uniquement dans le post de la room")
@@ -127,9 +157,11 @@ class ConfigCog(
         recap = f"<#{config.recap_channel_id}>" if config.recap_channel_id else "*post de la room uniquement*"
         role = f"<@&{config.ping_role_id}>" if config.ping_role_id else "*personne*"
         apworlds = f"<#{config.apworld_channel_id}>" if config.apworld_channel_id else "*aucun*"
+        log_forum = f"<#{config.log_forum_id}>" if config.log_forum_id else "*aucun* — `/config suivi`"
         creation = "admins uniquement" if config.admin_only_games else "tous les membres"
         text = (
-            f"### {E.settings} Configuration\n**Forum des rooms** : {forum}\n**Récaps** : {recap}\n"
+            f"### {E.settings} Configuration\n**Forum des rooms** : {forum}\n**Suivi complet** : {log_forum}\n"
+            f"**Récaps** : {recap}\n"
             f"**Pingé pour les nouvelles parties** : {role}\n**Salon des apworlds** : {apworlds}\n"
             f"**Création des parties** : {creation}"
         )

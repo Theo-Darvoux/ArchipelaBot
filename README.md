@@ -1,8 +1,8 @@
 # ArchipelaBot
 
 Bot Discord pour organiser et suivre des parties [Archipelago](https://archipelago.gg) : chaque partie a son post
-dans un salon forum, de l'annonce (inscriptions et yamls) jusqu'à la fin, avec un panneau de status, le fil des items,
-les événements importants et le pont de chat.
+dans un salon forum, de l'annonce (inscriptions et yamls) jusqu'à la fin, avec un panneau de status, les goals et le
+pont de chat. Tous les checks vont dans un post à part, dans un forum de suivi complet en lecture seule.
 
 ## Installation
 
@@ -18,20 +18,22 @@ les événements importants et le pont de chat.
    uv run archipelabot
    ```
 4. Sur Discord, crée un salon **forum** puis lance `/config forum salon:#ton-forum`.
+5. Pour le suivi complet, crée un second forum (par exemple `#suivi-complet`), retire aux membres *Envoyer des messages*
+   et *Envoyer des messages dans les fils*, puis lance `/config suivi salon:#suivi-complet`.
 
 ## Commandes
 
 | Commande | Effet |
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
-| `/config forum` · `recap` · `annonces` · `apworlds` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre. `apworlds` : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties |
+| `/config forum` · `suivi` · `recap` · `annonces` · `apworlds` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `suivi` : le forum où chaque room a son suivi complet (items, morts, hints, release…), le post de la room ne gardant que le chat, les goals et les pings. `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre. `apworlds` : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties |
 | `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
 | `/partie lancer [release] [collect] [remaining] [cout_hint] [mot_de_passe]` | Dans le post d'une partie en inscriptions : le bot génère la partie avec les yamls et apworlds du post, l'héberge lui-même et la suit dans ce post (voir plus bas). Réservé à qui l'a annoncée et aux modérateurs |
 | `/partie annuler` | Dans le post d'une partie en inscriptions : l'annuler (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
 | `/partie yamls` | Dans le post d'une partie, en inscriptions ou après le lancement : voir, retirer ou remplacer les yamls de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire). Après le lancement, pour regénérer la room ; renvoie ensuite le spoiler avec `/track logique`. Réservé à qui a annoncé la partie, à qui a lancé le suivi et aux modérateurs |
 | `/partie modifier [nom] [debut] [description]` | Dans le post d'une partie en inscriptions : changer ses infos (`-` pour retirer la date ou la description). Réservé à qui l'a annoncée et aux modérateurs |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
-| `/track reglages` | Dans le post d'une room : choisir ce qui est affiché |
+| `/track reglages` | Dans le post d'une room : choisir ce qui est affiché dans le suivi complet, et couper le pont de chat |
 | `/track logique spoiler:<fichier>` | Dans le post d'une room lancée depuis une partie : avec le spoiler log de la génération, le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique (voir plus bas). Réservé à qui a lancé le suivi et aux modérateurs |
 | `/track apworlds` | Dans le post d'une room lancée depuis une partie : choisir, jeu par jeu, l'apworld qui a servi à générer, parmi ceux du serveur (pour une partie d'avant la gestion des apworlds, ou pour corriger une version). Réservé à qui a lancé le suivi et aux modérateurs |
 | `/apworld envoyer fichier:<.apworld>` | Ajouter un apworld au serveur hors d'une partie : il est ensuite proposé dans les inscriptions et dans `/track apworlds` |
@@ -41,7 +43,9 @@ les événements importants et le pont de chat.
 | `/status [joueur]` | Dans le post d'une room : progression détaillée d'un joueur (par défaut, le tien) |
 | `/hints [joueur]` | Dans le post d'une room : tes hints (ou ceux d'un joueur), visibles seulement par toi |
 | `/recap` | Dans le post d'une room : publier le récap (podium, chiffres, graphique), même une fois le suivi arrêté. Réservé à qui a lancé le suivi et aux modérateurs |
-| `/notifs` | Être prévenu des items de progression reçus : mention dans le post, DM, ou rien. Seulement quand tu n'es pas en jeu (depuis au moins 2 minutes), et une seule fois par absence |
+| `/ping [item] [joueur]` | Dans le post d'une room : être prévenu chaque fois que ton slot (ou celui de `joueur`) reçoit cet item. Sans `item` : voir et retirer tes pings |
+| `/notifs` | Où arrivent tes pings `/ping` : mention dans le post de la room, DM, ou rien |
+| `/historique [joueur]` | Dans le post d'une room ou son suivi complet, même après l'arrêt : tout ce qui s'est passé (items, morts, goals, hints, release…), ou seulement ce qui concerne un joueur, page par page, avec export `.txt` |
 
 ## Déploiement (VPS avec Docker)
 

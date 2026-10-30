@@ -1,13 +1,14 @@
 import asyncio
 
-from archipelabot.ap.protocol import ClientStatus, ItemFlags
+from archipelabot.ap.protocol import ItemFlags
 from archipelabot.core import events as ev
 from archipelabot.core.room import RoomState, SlotInfo
+from archipelabot.storage.claims import NotifMode
 from archipelabot.storage.rooms import RoomSettings
-from archipelabot.ui.render.feed import Line, Ping, feed_view, render_event
+from archipelabot.ui.render.feed import Line, chat_event, feed_view, render_event
 from archipelabot.ui.services.feed import FeedMessage, FeedService, pack_lines
 from archipelabot.ui.services.panel import PanelService
-from archipelabot.ui.services.presence import Presence
+from archipelabot.ui.services.pings import PingService
 
 from .fakes import view_text
 
@@ -26,9 +27,9 @@ def item(finder=1, receiver=2, name="Hookshot", flags=ItemFlags.PROGRESSION) -> 
     return ev.ItemSent(finder, receiver, name, "Kakariko Well", flags)
 
 
-def render(event, settings=SETTINGS, ping=lambda slot: None):
-    """The single output of an event, or None."""
-    outputs = render_event(event, STATE, settings, ping)
+def render(event, settings=SETTINGS):
+    """The single output of an event in the full log, or None."""
+    outputs = render_event(event, STATE, settings)
     assert len(outputs) <= 1
     return outputs[0] if outputs else None
 
@@ -53,13 +54,24 @@ def test_bulk_and_key_events():
     assert render(released) == Line("📤 **Alice** a release · 3 items envoyés à 2 joueurs")
     assert render(ev.Collected(2, (item(1, 2),))).text.endswith("1 item récupéré")
     assert render(ev.Released(1)).text.endswith("plus rien à envoyer")
-
-    assert render(ev.ChatMessage(2, "salut **toi**")) == Line(r"💬 **Bob\_\*x\*** : salut \*\*toi\*\*")
     assert render(ev.Death("Bob", "Bob fell")) == Line("💀 Mort de **Bob** · « Bob fell »")
+    assert render(ev.GoalReached(1)) == Line("🏆 Alice a terminé *Ocarina of Time* !")
+    assert render(ev.ChatMessage(2, "salut")) is None  # the chat stays in the room's post
+
+
+def test_the_room_post_keeps_only_chat_and_goals():
+    def chat(event, settings=SETTINGS):
+        return chat_event(event, STATE, settings)
+
+    assert chat(ev.ChatMessage(2, "salut **toi**")) == [Line(r"💬 **Bob\_\*x\*** : salut \*\*toi\*\*")]
+    assert chat(ev.ChatMessage(2, "salut"), RoomSettings(chat_bridge=False)) == []
+    assert chat(ev.GoalReached(1)) == [Line("🏆 Alice a terminé *Ocarina of Time* !")]
+    for event in (item(), ev.Released(1, (item(),)), ev.Death("Bob", None), ev.PlayerJoined(1), ev.Collected(1)):
+        assert chat(event, RoomSettings(show_joins=True)) == []
 
 
 def test_pack_lines_respects_the_limits_and_keeps_mentions():
-    lines = [Line(f"ligne {i:03}", Ping(i, ()) if i % 10 == 0 else None) for i in range(45)]
+    lines = [Line(f"ligne {i:03}", i if i % 10 == 0 else None) for i in range(45)]
     messages = list(pack_lines(lines, max_lines=20, max_chars=1000))
     assert [len(m.lines) for m in messages] == [20, 20, 5]
     assert [line for m in messages for line in m.lines] == [line.text for line in lines]
@@ -75,32 +87,11 @@ def test_feed_view_has_one_text_per_line():
     assert [item.content for item in view.children] == ["a\n-# lieu", "b", "c"]
 
 
-def test_progression_items_ping_their_receiver():
-    ping = {2: 222}.get  # Bob is claimed, Carol isn't
-    line = render(item(1, 2), ping=ping)
-    assert line == Line("🟣 Alice → **Hookshot** → <@222>\n-# Kakariko Well", Ping(222, (item(1, 2),)))
-    assert render(item(1, 3), ping=ping).ping is None
-    assert render(item(1, 2, flags=ItemFlags.USEFUL), ping=ping).ping is None  # only progression pings
-    assert render(item(2, 2), ping=ping).ping is None  # finding your own item doesn't ping
-
-    hidden = RoomSettings(show_progression=False)
-    assert render(item(1, 2), hidden, ping).ping.user == 222  # a ping is never filtered out
-    assert render(item(1, 3), hidden, ping) is None
-
-
-def test_release_pings_each_claimed_receiver_once():
-    items = (*(item(1, 2, f"Item {i}") for i in range(10)), item(1, 3), item(1, 2, "Rupee", ItemFlags.FILLER))
-    summary, ping_line = render_event(ev.Released(1, items), STATE, SETTINGS, {2: 222}.get)
-    assert summary.text == "📤 **Alice** a release · 12 items envoyés à 2 joueurs"
-    assert ping_line.ping == Ping(222, items[:10])
-    assert ping_line.text.startswith("📬 <@222> · 10 items de progression grâce à ce release : **Item 0**")
-    assert ping_line.text.endswith("**Item 7** et 2 autres")
-
-
 class Sink:
     def __init__(self) -> None:
         self.sent: list[str] = []
         self.mentions: list[tuple[int, ...]] = []
+        self.dms: list[str] = []
 
     async def send_lines(self, message: FeedMessage) -> None:
         self.sent.append("\n".join(message.lines))
@@ -109,92 +100,67 @@ class Sink:
     async def send_view(self, view) -> None:
         self.sent.append(f"[card] {view_text(view)}")
 
+    async def send_dm(self, user_id, view) -> None:
+        self.dms.append(f"{user_id}: {view_text(view)}")
 
-def away_feed(statuses):
-    now = [0.0]
-    state = RoomState("archipelago.gg:38281", slots=dict(STATE.slots), statuses=statuses)
-    presence = Presence(state, grace=120, clock=lambda: now[0])
+
+def ping_service(watched: dict[tuple[int, str], list[int]], modes=None, claims=None):
     sink = Sink()
-    feed = FeedService(state, lambda: SETTINGS, sink, ping={2: 222, 3: 333}.get, presence=presence)
-    return feed, sink, now
+    service = PingService(
+        STATE,
+        lambda i: watched.get((i.receiver, i.item), []),
+        lambda user: (modes or {}).get(user, NotifMode.THREAD),
+        lambda user, slot: (claims or {}).get(slot) == user,
+        sink,
+        lambda: "Async",
+        lambda: "https://discord.com/channels/1/2",
+    )
+    return service, sink
 
 
-async def leave(feed, slot):
-    feed.state.statuses[slot] = ClientStatus.UNKNOWN
-    await feed.presence.handle(ev.PlayerLeft(slot))
-
-
-async def test_players_are_pinged_once_per_absence_from_the_game():
-    feed, sink, now = away_feed({2: ClientStatus.PLAYING, 3: ClientStatus.GOAL})
-
-    await feed.handle(item(1, 2, "Hookshot"))
-    await feed.handle(item(1, 3, "Hammer"))  # Carol is done
-    await feed.flush()
-    assert sink.mentions == [()]  # Bob is playing: he gets it in game
-    assert "<@222>" in sink.sent[0]
-
-    now[0] = 100
-    await leave(feed, 2)
-    now[0] = 110
-    await feed.handle(item(1, 2, "Bow"))
-    await feed.flush()
-    assert sink.mentions[-1] == ()  # he may just be restarting his game
-
-    now[0] = 230
-    await feed.flush()
-    assert sink.sent[-1] == "📬 <@222> · 1 item de progression t'attend : **Bow**"
-    assert sink.mentions[-1] == (222,)
-
-    now[0] = 240
-    await feed.handle(item(1, 2, "Lens"))
-    await feed.flush()
-    assert sink.mentions[-1] == ()  # already pinged during this absence
-
-    await feed.presence.handle(ev.PlayerJoined(2))
-    now[0] = 400
-    await leave(feed, 2)
-    now[0] = 530
-    await feed.handle(item(1, 2, "Flippers"))
-    await feed.flush()
-    assert sink.mentions[-1] == (222,)  # a new absence: pinged right on the item's line
-    assert "Flippers" in sink.sent[-1] and "t'attend" not in sink.sent[-1]
-
-
-async def test_the_bots_own_connections_are_not_a_return():
-    feed, sink, now = away_feed({2: ClientStatus.PLAYING})
-    await leave(feed, 2)
-    now[0] = 200
-    feed.state.statuses[2] = ClientStatus.CONNECTED  # e.g. the baseline sync, tagged Tracker: no PlayerJoined
-    await feed.handle(item(1, 2, "Bow"))
-    await feed.flush()
+async def test_only_the_items_asked_for_ping():
+    pings, sink = ping_service({(2, "Hookshot"): [222], (3, "Bow"): [222]}, claims={2: 222})
+    await pings.handle(item(1, 2, "Hookshot"))
+    await pings.handle(item(1, 2, "Rupee", ItemFlags.FILLER))  # not asked for
+    await pings.handle(item(1, 3, "Bow"))  # Carol's, watched by Bob's player
+    await pings.handle(item(2, 2, "Hookshot"))  # found by Bob himself
+    await pings.handle(ev.GoalReached(1))
+    await pings.flush()
+    assert sink.sent == [
+        "🟣 Alice → **Hookshot** → <@222>\n-# Kakariko Well\n📬 <@222> · 🟣 Alice → **Bow** → Carol\n-# Kakariko Well"
+    ]
     assert sink.mentions == [(222,)]
 
-
-async def test_a_short_disconnection_is_not_an_absence():
-    feed, sink, now = away_feed({2: ClientStatus.PLAYING})
-    await leave(feed, 2)
-    now[0] = 10
-    await feed.handle(item(1, 2, "Bow"))
-    await feed.flush()
-    now[0] = 30
-    await feed.presence.handle(ev.PlayerJoined(2))
-    now[0] = 300
-    await feed.flush()
-    assert sink.mentions == [()]
+    await pings.flush()
+    assert len(sink.sent) == 1  # nothing new
 
 
-async def test_a_user_is_pinged_once_even_across_several_messages():
-    sink = Sink()
-    feed = FeedService(STATE, lambda: SETTINGS, sink, ping={2: 222}.get)
-    for i in range(45):
-        await feed.handle(item(1, 2, f"Item {i}"))
-    await feed.flush()
+async def test_released_items_ping_too_and_each_user_once_per_message():
+    pings, sink = ping_service({(2, f"Item {i}"): [222] for i in range(45)}, claims={2: 222})
+    await pings.handle(ev.Released(1, tuple(item(1, 2, f"Item {i}") for i in range(45))))
+    await pings.flush()
     assert sink.mentions == [(222,), (), ()]
 
 
-async def test_feed_reports_only_sleep_and_address_changes():
+async def test_ping_modes():
+    watched = {(2, "Hookshot"): [222, 333, 444]}
+    modes = {333: NotifMode.DM, 444: NotifMode.OFF}
+    pings, sink = ping_service(watched, modes)
+    await pings.handle(item(1, 2, "Hookshot"))
+    await pings.flush()
+    assert sink.mentions == [(222,)]
+    [dm] = sink.dms
+    assert dm.startswith("333: ### 📬 Nouveaux items · Async\n🟣 **Hookshot** pour Bob\\_\\*x\\* · de Alice")
+    assert "444" not in "".join(sink.sent + sink.dms)
+
+
+def chat_feed(address="archipelago.gg:40000"):
     sink = Sink()
-    feed = FeedService(RoomState("archipelago.gg:40000"), lambda: SETTINGS, sink)
+    return FeedService(address, lambda e: chat_event(e, STATE, SETTINGS), sink, connections=True), sink
+
+
+async def test_feed_reports_only_sleep_and_address_changes():
+    feed, sink = chat_feed()
     conn = lambda state, port=40000: ev.ConnectionChanged(state, f"archipelago.gg:{port}")  # noqa: E731
 
     await feed.handle(conn(ev.ConnectionState.RECONNECTING))
@@ -210,9 +176,17 @@ async def test_feed_reports_only_sleep_and_address_changes():
     assert "endormie" in message and "nouveau lien · `archipelago.gg:41000`" in message
 
 
-async def test_sleep_is_told_once_until_something_happens():
+async def test_the_full_log_says_nothing_about_the_connection():
     sink = Sink()
-    feed = FeedService(STATE, lambda: SETTINGS, sink)
+    feed = FeedService(STATE.address, lambda e: render_event(e, STATE, SETTINGS), sink)
+    await feed.handle(ev.ConnectionChanged(ev.ConnectionState.ASLEEP, STATE.address))
+    await feed.handle(item())
+    await feed.flush()
+    assert sink.sent == ["🟣 Alice → **Hookshot** → Bob\\_\\*x\\*\n-# Kakariko Well"]
+
+
+async def test_sleep_is_told_once_until_something_happens():
+    feed, sink = chat_feed(STATE.address)
     conn = lambda state: ev.ConnectionChanged(state, STATE.address)  # noqa: E731
     for _ in range(3):  # the room is woken up and falls asleep again every couple of hours
         await feed.handle(conn(ev.ConnectionState.ASLEEP))
@@ -220,7 +194,7 @@ async def test_sleep_is_told_once_until_something_happens():
     await feed.flush()
     assert len(sink.sent) == 1
 
-    await feed.handle(item())
+    await feed.handle(ev.ChatMessage(1, "hop"))
     await feed.handle(conn(ev.ConnectionState.ASLEEP))
     await feed.flush()
     assert "endormie" in sink.sent[-1]

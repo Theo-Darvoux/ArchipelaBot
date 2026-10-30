@@ -6,10 +6,12 @@ from discord.ext import commands
 
 from ...errors import UserError
 from ...storage.claims import NotifMode
-from ..autocomplete import slot_autocomplete
+from ...storage.pings import ItemPing
+from ..autocomplete import item_autocomplete, slot_autocomplete
 from ..components import Tone, notice
 from ..emojis import E
 from ..panel_buttons import claimed_message
+from ..pings import PingsView
 from ..render.text import md
 from ..rooms import RoomRuntime
 from ..types import Interaction
@@ -84,7 +86,38 @@ class ClaimCog(commands.Cog, name="claim"):
         name = md(runtime.tracker.state.name(number))
         await interaction.response.send_message(view=notice(f"**{name}** est libéré.", Tone.SUCCESS), ephemeral=True)
 
-    @app_commands.command(name="notifs", description="Comment tu veux être prévenu quand tu reçois un item")
+    @app_commands.command(name="ping", description="Être prévenu quand ton slot reçoit un item précis")
+    @app_commands.describe(
+        item="L'item attendu · vide : voir et retirer tes pings",
+        joueur="Le slot qui doit le recevoir, si ce n'est pas le tien",
+    )
+    @app_commands.autocomplete(item=item_autocomplete, joueur=slot_autocomplete)
+    @app_commands.guild_only()
+    async def ping(self, interaction: Interaction, item: str | None = None, joueur: str | None = None) -> None:
+        runtime = self._room_here(interaction)
+        user = interaction.user.id
+        if item is None:
+            await interaction.response.send_message(view=PingsView(runtime, user), ephemeral=True)
+            return
+        if joueur is not None:
+            slots = [runtime.slot_named(joueur)]
+        else:
+            slots = sorted(slot for slot, owner in runtime.claims.items() if owner == user)
+        if not slots:
+            raise UserError("Indique avec `joueur` le slot qui doit recevoir l'item, ou clique d'abord sur **Je joue**")
+        state = runtime.tracker.state
+        added = []
+        for slot in slots:
+            if name := runtime.item_named(slot, item):
+                await runtime.watch(ItemPing(user, slot, name))
+                added.append(f"**{md(name)}** pour {md(state.name(slot))}")
+        if not added:
+            games = ", ".join(sorted({f"*{md(state.game(slot))}*" for slot in slots}))
+            raise UserError(f"Aucun item **{md(item)}** dans {games}.")
+        note = f"{E.ping} Ajouté : {', '.join(added)}."
+        await interaction.response.send_message(view=PingsView(runtime, user, note), ephemeral=True)
+
+    @app_commands.command(name="notifs", description="Où arrivent tes pings d'items (/ping)")
     @app_commands.describe(mode="Laisser vide pour voir le réglage actuel")
     @app_commands.choices(
         mode=[app_commands.Choice(name=label, value=mode.value) for mode, label in NOTIF_LABELS.items()]
@@ -93,12 +126,12 @@ class ClaimCog(commands.Cog, name="claim"):
         user = interaction.user.id
         if mode is None:
             current = self.bot.notif_prefs.mode(user)
-            text = f"Quand tu reçois un item de progression : {notif_label(current)}."
+            text = f"Quand un item que tu attends (`/ping`) arrive : {notif_label(current)}."
             text += "\n-# `/notifs mode:` pour changer."
             await interaction.response.send_message(view=notice(text), ephemeral=True)
             return
         await self.bot.notif_prefs.set(user, NotifMode(mode.value))
-        text = f"Quand tu reçois un item de progression : {notif_label(NotifMode(mode.value))}."
+        text = f"Quand un item que tu attends (`/ping`) arrive : {notif_label(NotifMode(mode.value))}."
         await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
 
 

@@ -9,7 +9,7 @@ from ...ap.protocol import ClientStatus
 from ...core import events as ev
 from ...core.progress import Baseline, Progress, utcnow
 from ...core.room import RoomState, SlotInfo
-from ...storage.history import HistoryRepo, LoggedEvent, SavedSlot, Snapshot
+from ...storage.history import HistoryRepo, LoggedEvent, LoggedItem, SavedSlot, Snapshot
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +115,17 @@ class ProgressService:
 
     async def _log(self, event: ev.Event) -> None:
         now = utcnow()
+        match event:
+            case ev.ItemSent():
+                items: tuple[ev.ItemSent, ...] = (event,)
+            case ev.Released(items=items) | ev.Collected(items=items):
+                pass
+            case _:
+                items = ()
+        if items:
+            await self.history.log_items(
+                self.room_id, [LoggedItem(now, i.finder, i.receiver, i.item, i.location, int(i.flags)) for i in items]
+            )
         match event:
             case ev.GoalReached(slot=slot):
                 logged = LoggedEvent(self.progress[slot].goal_at or now, "goal", slot)

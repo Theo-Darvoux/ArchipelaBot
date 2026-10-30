@@ -35,6 +35,7 @@ EXTENSIONS = (
     "archipelabot.ui.cogs.apworld",
     "archipelabot.ui.cogs.claim",
     "archipelabot.ui.cogs.status",
+    "archipelabot.ui.cogs.history",
     "archipelabot.ui.cogs.bridge",
     "archipelabot.ui.cogs.help",
 )

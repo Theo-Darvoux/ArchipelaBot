@@ -1,13 +1,10 @@
-"""Room events -> what is posted in the room's forum post."""
+"""Room events -> what is posted in the room's post and in its full log."""
 
-from collections import defaultdict
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import discord
 from discord import ui
 
-from ...ap.protocol import ItemFlags
 from ...core import events as ev
 from ...core.room import RoomState
 from ...storage.rooms import RoomSettings
@@ -18,19 +15,11 @@ GOAL_COLOUR = discord.Colour.gold()
 
 
 @dataclass(frozen=True, slots=True)
-class Ping:
-    """A Discord user to notify about the progression items they received."""
-
-    user: int
-    items: tuple[ev.ItemSent, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class Line:
     """A compact line, grouped with others into a single message."""
 
     text: str
-    ping: Ping | None = None
+    mention: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,13 +47,19 @@ def feed_view(lines: list[str]) -> ui.LayoutView:
     return view
 
 
-type Pinger = Callable[[int], int | None]
-
-MAX_LISTED_ITEMS = 8
-
-
-def no_ping(_slot: int) -> None:
-    return None
+def log_header(name: str, thread_id: int | None) -> ui.LayoutView:
+    view = ui.LayoutView()
+    room = f"\nPour en parler : <#{thread_id}>" if thread_id else ""
+    view.add_item(
+        ui.Container(
+            ui.TextDisplay(
+                f"## {E.info} {md(name)}\nTous les checks de la room, au fil de la partie.{room}\n"
+                "-# `/historique` pour retrouver ce qui concerne un joueur."
+            ),
+            accent_colour=discord.Colour.blurple(),
+        )
+    )
+    return view
 
 
 def item_line(item: ev.ItemSent, state: RoomState, ping_user: int | None = None) -> str:
@@ -76,45 +71,29 @@ def item_line(item: ev.ItemSent, state: RoomState, ping_user: int | None = None)
     return f"{emoji} {md(state.name(item.finder))} → **{md(item.item)}** → {receiver}{location}"
 
 
-def pinged_user(item: ev.ItemSent, ping: Pinger) -> int | None:
-    if item.self_found or not item.flags & ItemFlags.PROGRESSION:
-        return None
-    return ping(item.receiver)
+def ping_line(item: ev.ItemSent, state: RoomState, user: int, *, own: bool) -> Line:
+    """`own`: the user plays the receiving slot, and is named in its place."""
+    if own:
+        return Line(item_line(item, state, user), user)
+    return Line(f"{E.ping} <@{user}> · " + item_line(item, state), user)
 
 
-def item_list(items: Sequence[ev.ItemSent]) -> str:
-    names = ", ".join(f"**{md(i.item)}**" for i in items[:MAX_LISTED_ITEMS])
-    return names + (f" et {len(items) - MAX_LISTED_ITEMS} autres" if len(items) > MAX_LISTED_ITEMS else "")
-
-
-def render_event(event: ev.Event, state: RoomState, settings: RoomSettings, ping: Pinger = no_ping) -> list[FeedOutput]:
+def render_event(event: ev.Event, state: RoomState, settings: RoomSettings) -> list[FeedOutput]:
+    """The room's full log."""
     match event:
-        case ev.ItemSent():
-            if user := pinged_user(event, ping):
-                return [Line(item_line(event, state, user), Ping(user, (event,)))]
-            return [Line(item_line(event, state))] if settings.shows_item(event.flags) else []
+        case ev.ItemSent() if settings.shows_item(event.flags):
+            return [Line(item_line(event, state))]
         case ev.Released(slot=slot, items=items):
             receivers = {i.receiver for i in items}
             detail = "plus rien à envoyer"
             if items:
                 detail = f"{plural(len(items), 'item')} envoyés à {plural(len(receivers), 'joueur')}"
-            lines: list[FeedOutput] = [Line(f"{E.release} **{md(state.name(slot))}** a release · {detail}")]
-            by_user: dict[int, list[ev.ItemSent]] = defaultdict(list)
-            for item in items:
-                if user := pinged_user(item, ping):
-                    by_user[user].append(item)
-            for user, received in by_user.items():
-                count = plural(len(received), "item de progression", "items de progression")
-                text = f"{E.ping} <@{user}> · {count} grâce à ce release : {item_list(received)}"
-                lines.append(Line(text, Ping(user, tuple(received))))
-            return lines
+            return [Line(f"{E.release} **{md(state.name(slot))}** a release · {detail}")]
         case ev.Collected(slot=slot, items=items):
             detail = f"{plural(len(items), 'item récupéré', 'items récupérés')}" if items else "rien à récupérer"
             return [Line(f"{E.collect} **{md(state.name(slot))}** a collect · {detail}")]
-        case ev.GoalReached(slot=slot):
-            return [Line(f"{E.trophy} {md(state.name(slot))} a terminé *{md(state.game(slot))}* !")]
-        case ev.ChatMessage(slot=slot, text=text) if settings.chat_bridge:
-            return [Line(f"{E.chat} **{md(state.name(slot))}** : {md(truncate(text, 1500))}")]
+        case ev.GoalReached():
+            return [Line(goal_text(event, state))]
         case ev.Death(source=source, cause=cause) if settings.show_deaths:
             return [
                 Line(f"{E.death} Mort de **{md(source)}**" + (f" · « {md(truncate(cause, 300))} »" if cause else ""))
@@ -129,9 +108,18 @@ def render_event(event: ev.Event, state: RoomState, settings: RoomSettings, ping
     return []
 
 
-def waiting_line(ping: Ping) -> Line:
-    count = plural(len(ping.items), "item de progression t'attend", "items de progression t'attendent")
-    return Line(f"{E.ping} <@{ping.user}> · {count} : {item_list(ping.items)}", ping)
+def chat_event(event: ev.Event, state: RoomState, settings: RoomSettings) -> list[FeedOutput]:
+    """What still goes in the room's post, where people talk."""
+    match event:
+        case ev.GoalReached():
+            return [Line(goal_text(event, state))]
+        case ev.ChatMessage(slot=slot, text=text) if settings.chat_bridge:
+            return [Line(f"{E.chat} **{md(state.name(slot))}** : {md(truncate(text, 1500))}")]
+    return []
+
+
+def goal_text(event: ev.GoalReached, state: RoomState) -> str:
+    return f"{E.trophy} {md(state.name(event.slot))} a terminé *{md(state.game(event.slot))}* !"
 
 
 def connection_line(event: ev.ConnectionChanged, address_changed: bool) -> Line | None:

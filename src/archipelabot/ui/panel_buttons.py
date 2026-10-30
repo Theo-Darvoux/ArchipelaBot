@@ -25,11 +25,11 @@ MAX_FILES = 10  # per message
 FILENAME = re.compile(r"[^\w.-]")
 
 NOTIF_NOTES = {
-    NotifMode.THREAD: "-# Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot te mentionnera "
-    "dans le post de la room, une fois par absence. `/notifs` pour recevoir ça en DM, ou plus du tout.",
-    NotifMode.DM: "-# Si tu reçois un item de progression pendant que tu n'es pas en jeu, le bot t'enverra un message "
-    "privé, une fois par absence. `/notifs` pour changer.",
-    NotifMode.OFF: "-# Tu as désactivé les notifications d'items. `/notifs` pour les réactiver.",
+    NotifMode.THREAD: "-# `/ping` pour être mentionné dans le post quand ton slot reçoit un item précis. "
+    "`/notifs` pour recevoir ça en DM.",
+    NotifMode.DM: "-# `/ping` pour recevoir un message privé quand ton slot reçoit un item précis. `/notifs` pour "
+    "changer.",
+    NotifMode.OFF: "-# Tu as désactivé tes pings. `/notifs` pour les réactiver.",
 }
 
 

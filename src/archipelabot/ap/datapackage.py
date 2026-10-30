@@ -71,6 +71,10 @@ class DataPackageStore:
         data = self._data(game, checksum)
         return (data and data.items.get(item_id)) or f"Item #{item_id}"
 
+    def item_names(self, game: str) -> list[str]:
+        data = self._latest.get(game)
+        return sorted(data.items.values()) if data else []
+
     def location_name(self, game: str, checksum: str, location_id: int) -> str:
         data = self._data(game, checksum)
         return (data and data.locations.get(location_id)) or f"Lieu #{location_id}"

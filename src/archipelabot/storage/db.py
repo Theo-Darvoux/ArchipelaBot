@@ -159,6 +159,28 @@ MIGRATIONS: list[str] = [
     ALTER TABLE room ADD COLUMN host_version TEXT;
     ALTER TABLE room ADD COLUMN host_options TEXT;
     """,
+    """
+    ALTER TABLE guild_config ADD COLUMN log_forum_id INTEGER;
+    ALTER TABLE room ADD COLUMN log_thread_id INTEGER;     -- the room's post in the full log forum
+    CREATE TABLE room_item (
+        id          INTEGER PRIMARY KEY,
+        room_id     INTEGER NOT NULL REFERENCES room (id) ON DELETE CASCADE,
+        at          TEXT NOT NULL,
+        finder      INTEGER NOT NULL,
+        receiver    INTEGER NOT NULL,
+        item        TEXT NOT NULL,
+        location    TEXT NOT NULL,
+        flags       INTEGER NOT NULL
+    );
+    CREATE INDEX room_item_room ON room_item (room_id, at);
+    CREATE TABLE item_ping (
+        room_id     INTEGER NOT NULL REFERENCES room (id) ON DELETE CASCADE,
+        user_id     INTEGER NOT NULL,
+        slot        INTEGER NOT NULL,   -- the receiving slot
+        item        TEXT NOT NULL,
+        PRIMARY KEY (room_id, user_id, slot, item)
+    );
+    """,
 ]
 
 

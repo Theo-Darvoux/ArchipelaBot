@@ -52,7 +52,7 @@ async def wait_until(predicate, wait=10.0):
             await asyncio.sleep(0.05)
 
 
-async def test_track_creates_post_and_posts_items(bot, discord_env, ap_server):
+async def test_track_creates_post_and_relays_chat(bot, discord_env, ap_server):
     guild, forum = discord_env
     interaction = await track(bot, guild, lien=ap_server.address, slot="Alice", nom="Async test")
 
@@ -69,7 +69,7 @@ async def test_track_creates_post_and_posts_items(bot, discord_env, ap_server):
     await carol.send(p.location_checks_packet(carol.connected.missing_locations[:3]), p.say_packet("coucou"))
 
     async def posted():
-        await runtime.feed.flush()
+        await runtime.flush()
         return any("coucou" in t for t in thread.texts())
 
     async with asyncio.timeout(10):
@@ -277,7 +277,7 @@ async def test_events_while_the_post_is_created_are_posted(bot, discord_env, ap_
     runtime = bot.rooms.by_thread(thread.id)
 
     async def posted():
-        await runtime.feed.flush()
+        await runtime.flush()
         return any("je suis déjà là" in t for t in thread.texts())
 
     async with asyncio.timeout(10):

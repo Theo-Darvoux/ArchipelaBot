@@ -184,7 +184,7 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         view = await GameApworldsView.create(self.bot.games, game)
         await interaction.response.send_message(view=view, ephemeral=True)
 
-    @app_commands.command(name="reglages", description="Choisir ce qui est affiché dans le fil de cette room")
+    @app_commands.command(name="reglages", description="Choisir ce qui est affiché dans le suivi complet de la room")
     async def settings(self, interaction: Interaction) -> None:
         runtime = self._room_here(interaction)
         self._check_manager(interaction, runtime)

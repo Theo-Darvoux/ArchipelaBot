@@ -79,10 +79,10 @@ async def test_claim_rules(bot, room):
     interaction = await run_command(bot, "claim", guild, thread, slot="bob")  # case-insensitive
     assert runtime.claims == {2: 77}
     assert "`/ping` pour être mentionné" in view_text(interaction.replies[0]["view"])
-    await bot.notif_prefs.set(77, NotifMode.OFF)
+    await bot.notif_prefs.set(77, NotifMode.DM)
     interaction = await run_command(bot, "claim", guild, thread, slot="Bob")
     assert "Tu joues **Bob**" in view_text(interaction.replies[0]["view"])
-    assert "désactivé tes pings" in view_text(interaction.replies[0]["view"])
+    assert "message privé" in view_text(interaction.replies[0]["view"])
 
     with pytest.raises(UserError, match="déjà pris par <@77>"):
         await run_command(bot, "claim", guild, thread, user=88, slot="Bob")
@@ -190,6 +190,16 @@ async def test_pings_list_and_removal(bot, room):
     assert runtime.watched == {ItemPing(77, 3, second)}
     assert "retiré" in view_text(click.response.sent[0]["view"])
     assert await bot.rooms.ping_repo.for_room(runtime.record.id) == {ItemPing(77, 3, second)}
+
+    view = click.response.sent[0]["view"]
+    switch = next(b for b in view.walk_children() if getattr(b, "label", "") == "Recevoir en DM")
+    await switch.callback(FakeInteraction())
+    assert bot.notif_prefs.mode(77) == NotifMode.DM
+    assert "message privé" in view_text(view) and "Recevoir en mention" in view_text_buttons(view)
+
+
+def view_text_buttons(view) -> str:
+    return " ".join(b.label for b in view.walk_children() if isinstance(b, discord.ui.Button))
 
 
 async def test_dm_mode_sends_a_dm_instead(bot, room, ap_server):

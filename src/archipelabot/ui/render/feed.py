@@ -126,14 +126,9 @@ def connection_line(event: ev.ConnectionChanged, address_changed: bool) -> Line 
     match event.state:
         case ev.ConnectionState.CONNECTED if address_changed:
             return Line(f"-# {E.online} Reconnecté à la room, nouveau lien · `{event.address}`")
-        case ev.ConnectionState.ASLEEP:
-            return Line(
-                f"-# {E.offline} La room s'est endormie. "
-                "Le suivi reprendra tout seul dès que quelqu'un ouvrira sa page."
-            )
         case ev.ConnectionState.FAILED:
             return Line(
                 f"{E.failed} Le serveur a refusé la connexion ({event.detail}). Suivi en pause : "
-                "`/track reconnect` pour réessayer."
+                f"{E.settings} **Gérer** puis **Reconnecter** sur le panneau pour réessayer."
             )
     return None

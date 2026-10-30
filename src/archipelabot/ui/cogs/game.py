@@ -11,23 +11,18 @@ from ...core.hosting import ServerOptions
 from ...core.schedule import ScheduleError, label, parse_start, suggestions
 from ...errors import UserError
 from ...storage.games import GameRecord
-from ..apworlds import GameYamlsView
 from ..components import Tone, notice
 from ..emojis import E
-from ..forum import TAG_SPECS, RoomTag
 from ..games import check_can_create, is_signup_file
 from ..launch import host_game
-from ..render.text import md
 from ..signup_buttons import UploadReport
 from ..types import Interaction
-from ..views import ConfirmView
 
 if TYPE_CHECKING:
     from ...bot import ArchipelaBot
 
 log = logging.getLogger(__name__)
 
-CLEAR = "-"
 DEFAULTS = ServerOptions()
 MODE_CHOICES = [
     app_commands.Choice(name="automatique à l'objectif", value="auto"),
@@ -61,8 +56,6 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
         choices = [
             app_commands.Choice(name=label(start), value=label(start)) for start in suggestions(current, self._now())
         ]
-        if current.strip() == CLEAR:
-            choices.append(app_commands.Choice(name="Retirer la date", value=CLEAR))
         return choices
 
     @app_commands.command(name="nouvelle", description="Annoncer une partie et ouvrir les inscriptions (yamls)")
@@ -86,7 +79,7 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
         starts_at = self._start(debut) if debut else None
         forum = guild.get_channel(config.forum_id) if config.forum_id else None
         if forum is None or forum.type != discord.ChannelType.forum:
-            raise UserError("Aucun forum configuré pour les parties. Un admin doit d'abord utiliser `/config forum`.")
+            raise UserError("Aucun forum configuré pour les parties. Un admin doit d'abord le choisir avec `/config`.")
         await interaction.response.defer(ephemeral=True, thinking=True)
         name = nom or f"Multiworld du {(starts_at or datetime.now(UTC)).astimezone(self._now().tzinfo):%d/%m}"
         game = await self.bot.games.create(
@@ -98,52 +91,6 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
         )
         text = f"Partie annoncée → <#{game.thread_id}>\n-# Les inscriptions sont ouvertes : chacun envoie son yaml."
         await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
-
-    @app_commands.command(name="modifier", description="Changer le nom, la date ou la description de cette partie")
-    @app_commands.describe(
-        nom="Nouveau nom du post",
-        debut="Nouvelle date et heure de début (« - » pour la retirer)",
-        description="Nouvelle description (« - » pour la retirer)",
-    )
-    @app_commands.autocomplete(debut=start_autocomplete)
-    async def edit(
-        self,
-        interaction: Interaction,
-        nom: app_commands.Range[str, 1, 90] | None = None,
-        debut: str | None = None,
-        description: app_commands.Range[str, 1, 1000] | None = None,
-    ) -> None:
-        game = self._game_here(interaction, "la modifier")
-        starts_at = game.starts_at
-        if debut is not None:
-            starts_at = None if debut.strip() == CLEAR else self._start(debut)
-        if description is not None:
-            description = "" if description.strip() == CLEAR else description
-        await self.bot.games.edit(
-            game,
-            name=nom or game.name,
-            description=game.description if description is None else description,
-            starts_at=starts_at,
-        )
-        await interaction.response.send_message(view=notice("Partie mise à jour.", Tone.SUCCESS), ephemeral=True)
-
-    @app_commands.command(name="annuler", description="Annuler cette partie : les inscriptions sont fermées")
-    async def cancel(self, interaction: Interaction) -> None:
-        game = self._game_here(interaction, "l'annuler")
-
-        async def cancel() -> str:
-            if not await self.bot.games.cancel(game):
-                return "Cette partie n'est plus en inscriptions."
-            return f"{E.stopped} Partie annulée. Le post reste consultable, avec le tag {cancelled_tag}."
-
-        cancelled_tag = " ".join(TAG_SPECS[RoomTag.CANCELLED][::-1])
-        view = ConfirmView(
-            f"Annuler **{md(game.name)}** ?\n-# Les inscriptions seront fermées et le post gardera la liste des "
-            f"inscrits, avec le tag {cancelled_tag}.",
-            [("Annuler la partie", discord.ButtonStyle.danger, cancel)],
-            cancel_label="Garder la partie",
-        )
-        await interaction.response.send_message(view=view, ephemeral=True)
 
     @app_commands.command(name="lancer", description="Générer cette partie et l'héberger sur le bot")
     @app_commands.describe(
@@ -174,35 +121,12 @@ class GameCog(commands.GroupCog, name="partie", group_name="partie", group_descr
         text = (
             f"{E.host} Partie générée et hébergée · {len(players)} joueurs\n"
             f"Pour jouer : `{runtime.play_address}`\n"
-            f"-# Les bloqués et les checks en logique sont déjà actifs. Le serveur s'arrête avec le suivi "
-            f"({self.bot.command_mention('track stop')})."
+            "-# Les bloqués et les checks en logique sont déjà actifs. Le serveur s'arrête avec le suivi "
+            f"({E.settings} **Gérer** puis **Arrêter** sur le panneau)."
         )
         if warnings:
             text += "\n⚠️ Options inconnues des apworlds, ignorées :\n" + "\n".join(f"- {w}" for w in warnings[:10])
         await interaction.followup.send(view=notice(text, Tone.WARNING if warnings else Tone.SUCCESS), ephemeral=True)
-
-    @app_commands.command(name="yamls", description="Corriger les yamls de cette partie, avant ou après le lancement")
-    async def yamls(self, interaction: Interaction) -> None:
-        if self.bot.games.by_thread(interaction.channel_id) is not None:
-            game = self._game_here(interaction, "corriger les yamls")
-        else:
-            game = await self._started_here(interaction)
-        view = await GameYamlsView.create(self.bot.games, game)
-        await interaction.response.send_message(view=view, ephemeral=True)
-
-    async def _started_here(self, interaction: Interaction) -> GameRecord:
-        game = await self.bot.games.repo.started_in(interaction.channel_id or 0)
-        if game is None:
-            raise UserError("Utilise cette commande dans le post d'une partie.")
-        runtime = self.bot.rooms.by_thread(interaction.channel_id)
-        user, permissions = interaction.user.id, interaction.permissions
-        if user != game.created_by and not (runtime and runtime.can_manage(user, permissions)):
-            if not permissions.manage_threads:
-                raise UserError(
-                    "Seule la personne qui a annoncé la partie, celle qui a lancé le suivi, ou un modérateur peut "
-                    "corriger les yamls."
-                )
-        return game
 
     def _game_here(self, interaction: Interaction, action: str) -> GameRecord:
         game = self.bot.games.by_thread(interaction.channel_id)

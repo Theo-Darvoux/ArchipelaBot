@@ -109,7 +109,7 @@ async def _launch(
         config = await bot.guild_configs.get(guild.id)
         forum = guild.get_channel(config.forum_id) if config.forum_id else None
         if forum is None or forum.type != discord.ChannelType.forum:
-            raise UserError("Aucun forum configuré pour les rooms. Un admin doit d'abord utiliser `/config forum`.")
+            raise UserError("Aucun forum configuré pour les rooms. Un admin doit d'abord le choisir avec `/config`.")
 
     record = RoomRecord(
         guild_id=guild.id, name=name or "", address=link.strip(), slot=slot or "", password=password,

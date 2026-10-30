@@ -181,6 +181,9 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (room_id, user_id, slot, item)
     );
     """,
+    """
+    UPDATE user_pref SET notif_mode = 'thread' WHERE notif_mode = 'off';     -- "nothing" is not asking with /ping
+    """,
 ]
 
 

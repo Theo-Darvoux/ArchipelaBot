@@ -13,6 +13,7 @@ from ..errors import UserError
 from ..storage.claims import NotifMode
 from .components import Tone, notice
 from .emojis import E
+from .manage import can_manage, room_manage_view, stopped_room_view
 from .render.hints import all_hints_view, player_hints_view
 from .render.text import md, truncate
 
@@ -25,11 +26,9 @@ MAX_FILES = 10  # per message
 FILENAME = re.compile(r"[^\w.-]")
 
 NOTIF_NOTES = {
-    NotifMode.THREAD: "-# `/ping` pour être mentionné dans le post quand ton slot reçoit un item précis. "
-    "`/notifs` pour recevoir ça en DM.",
-    NotifMode.DM: "-# `/ping` pour recevoir un message privé quand ton slot reçoit un item précis. `/notifs` pour "
-    "changer.",
-    NotifMode.OFF: "-# Tu as désactivé tes pings. `/notifs` pour les réactiver.",
+    NotifMode.THREAD: "-# `/ping` pour être mentionné dans le post quand ton slot reçoit un item précis (ou en DM, "
+    "au choix).",
+    NotifMode.DM: "-# `/ping` pour recevoir un message privé quand ton slot reçoit un item précis.",
 }
 
 
@@ -106,9 +105,11 @@ class ClaimButton(ui.DynamicItem[ui.Button], template=r"archipelabot:claim:(?P<r
 
 
 class SettingsButton(ui.DynamicItem[ui.Button], template=r"archipelabot:settings:(?P<room>\d+)"):
+    """Opens what the person who started the room (or a moderator) can do with it, even once stopped."""
+
     def __init__(self, room_id: int) -> None:
         super().__init__(
-            ui.Button(label="Réglages", emoji=E.partial("settings"), style=discord.ButtonStyle.secondary,
+            ui.Button(label="Gérer", emoji=E.partial("settings"), style=discord.ButtonStyle.secondary,
                       custom_id=f"archipelabot:settings:{room_id}")
         )  # fmt: skip
         self.room_id = room_id
@@ -120,14 +121,17 @@ class SettingsButton(ui.DynamicItem[ui.Button], template=r"archipelabot:settings
         return cls(int(match["room"]))
 
     async def callback(self, interaction: "Interaction") -> None:
-        runtime = interaction.client.rooms.get(self.room_id)
-        if runtime is None:
-            view = notice("Cette room n'est plus suivie.", Tone.WARNING)
-        elif not runtime.can_manage(interaction.user.id, interaction.permissions):
-            view = notice("Seule la personne qui a lancé le suivi (ou un modérateur) peut changer les réglages.",
-                          Tone.ERROR)  # fmt: skip
+        rooms = interaction.client.rooms
+        runtime = rooms.get(self.room_id)
+        record = runtime.record if runtime else await rooms.repo.get(self.room_id)
+        if record is None:
+            view = notice("Cette room n'existe plus.", Tone.WARNING)
+        elif not can_manage(record, interaction.user.id, interaction.permissions):
+            view = notice("Seule la personne qui a lancé le suivi (ou un modérateur) peut gérer la room.", Tone.ERROR)
+        elif runtime is None:
+            view = stopped_room_view(record)
         else:
-            view = runtime.settings_view()
+            view = await room_manage_view(interaction.client, runtime)
         await interaction.response.send_message(view=view, ephemeral=True)
 
 

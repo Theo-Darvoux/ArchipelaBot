@@ -13,6 +13,7 @@ from archipelabot.core import events as ev
 from archipelabot.errors import UserError
 from archipelabot.storage.guilds import GuildConfig
 from archipelabot.storage.rooms import RoomRecord
+from archipelabot.ui.panel_buttons import SettingsButton
 from archipelabot.ui.rooms import RoomManager
 
 from .ap_server import fresh_server, requires_ap_server
@@ -44,6 +45,22 @@ async def track(bot, guild, **kwargs) -> FakeInteraction:
     interaction = FakeInteraction(guild=guild)
     await cog.start.callback(cog, interaction, **{"slot": None, "mot_de_passe": None, "nom": None, **kwargs})
     return interaction
+
+
+async def room_manage(bot, runtime, user=77):
+    """What the panel's "Gérer" button opens for this user."""
+    interaction = FakeInteraction(user=FakeUser(id=user))
+    interaction.client = bot
+    await SettingsButton(runtime.record.id).callback(interaction)
+    return interaction.response.sent[0]["view"]
+
+
+def buttons_of(view) -> dict:
+    return {b.label: b for b in view.walk_children() if isinstance(b, discord.ui.Button)}
+
+
+def button_items(view) -> list:
+    return [getattr(i, "item", i) for i in view.walk_children() if isinstance(i, discord.ui.DynamicItem)]
 
 
 async def wait_until(predicate, wait=10.0):
@@ -87,14 +104,12 @@ async def test_stop_and_settings_from_the_post(bot, discord_env, ap_server):
     runtime = bot.rooms.by_thread(thread.id)
     assert thread.name.startswith("Multiworld · 3 joueurs")
 
-    cog = bot.get_cog("track")
     # Someone else, without moderation rights, can't change anything.
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.settings.callback(cog, FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(id=5)))
+    assert "Seule la personne" in view_text(await room_manage(bot, runtime, user=5))
 
-    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
-    await cog.settings.callback(cog, interaction)
-    settings_view = interaction.response.sent[0]["view"]
+    settings_view = await room_manage(bot, runtime)
+    settings_view.to_components()
+    assert list(buttons_of(settings_view))[:3] == ["Reconnecter", "Récap", "Arrêter"]
     filler_button = next(
         section.accessory for section in settings_view.walk_children()
         if getattr(section, "accessory", None) and "filler" in view_text_of(section)
@@ -103,8 +118,9 @@ async def test_stop_and_settings_from_the_post(bot, discord_env, ap_server):
     assert runtime.record.settings.show_filler
     assert (await bot.rooms.repo.get(runtime.record.id)).settings.show_filler
 
-    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
-    await cog.stop.callback(cog, interaction)
+    interaction = FakeInteraction(guild=guild)
+    interaction.client = bot
+    await buttons_of(settings_view)["Arrêter"].callback(interaction)
     confirm_view = interaction.response.sent[0]["view"]
     labels = [b.label for b in confirm_view.walk_children() if isinstance(b, discord.ui.Button)]
     assert labels == ["Arrêter et publier le récap", "Arrêter sans récap", "Annuler"]
@@ -118,6 +134,11 @@ async def test_stop_and_settings_from_the_post(bot, discord_env, ap_server):
     assert [t.name for t in thread.applied_tags] == ["Terminée"]
     assert "⏹️ Suivi arrêté" in view_text(thread.messages[0].view)
     assert runtime.tracker.state.connection == ev.ConnectionState.STOPPED
+
+    # A stopped room keeps its "Gérer" button, for the recap.
+    assert [b.label for b in button_items(thread.messages[0].view)] == ["Gérer"]
+    stopped = await room_manage(bot, runtime)
+    assert list(buttons_of(stopped)) == ["Publier le récap"]
 
 
 def view_text_of(section) -> str:
@@ -138,7 +159,7 @@ async def test_user_errors(bot, discord_env, ap_server):
         await track(bot, guild, lien=ap_server.address, slot="Bob")
 
     await bot.guild_configs.save(GuildConfig(guild.id))
-    with pytest.raises(UserError, match="/config forum"):
+    with pytest.raises(UserError, match="/config"):
         await track(bot, guild, lien=ap_server.address, slot="Alice")
 
 
@@ -246,9 +267,9 @@ async def test_stop_buttons_only_work_once(bot, discord_env, ap_server):
     guild, forum = discord_env
     await track(bot, guild, lien=ap_server.address, slot="Alice")
     [thread] = forum.threads
-    cog = bot.get_cog("track")
-    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
-    await cog.stop.callback(cog, interaction)
+    interaction = FakeInteraction(guild=guild)
+    interaction.client = bot
+    await buttons_of(await room_manage(bot, bot.rooms.by_thread(thread.id)))["Arrêter"].callback(interaction)
     view = interaction.response.sent[0]["view"]
     stop_button = next(b for b in view.walk_children() if getattr(b, "label", "") == "Arrêter et publier le récap")
 
@@ -311,15 +332,15 @@ async def test_reconnect_with_a_new_password(bot, discord_env, ap_server):
     await runtime.tracker._session.ws.close()
     await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.FAILED)
     await runtime.feed.flush()
-    assert any("`/track reconnect`" in t for t in thread.texts())
+    assert any("**Gérer** puis **Reconnecter**" in t for t in thread.texts())
 
-    cog = bot.get_cog("track")
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.reconnect.callback(
-            cog, FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(id=5)), mot_de_passe="neuf"
-        )
-    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
-    await cog.reconnect.callback(cog, interaction, mot_de_passe="neuf")
+    interaction = FakeInteraction(guild=guild)
+    await buttons_of(await room_manage(bot, runtime))["Reconnecter"].callback(interaction)
+    modal = interaction.response.sent[0]["modal"]
+    modal.password._value = "neuf"
+    interaction = FakeInteraction(guild=guild)
+    interaction.client = bot
+    await modal.on_submit(interaction)
     assert "Reconnexion lancée" in view_text(interaction.followup.sent[0]["view"])
     await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED)
     assert (await bot.rooms.repo.get(runtime.record.id)).password == "neuf"

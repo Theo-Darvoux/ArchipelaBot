@@ -76,21 +76,13 @@ class FeedService:
         self.interval = interval
         self._pending: list[FeedOutput] = []
         self._address = address
-        self._told_asleep = False
 
     async def handle(self, event: ev.Event) -> None:
         if isinstance(event, ev.ConnectionChanged):
-            if not self.connections:
-                return
-            if event.state == ev.ConnectionState.ASLEEP:
-                if self._told_asleep:
-                    return
-                self._told_asleep = True
-            if line := connection_line(event, self._address_changed(event)):
+            if self.connections and (line := connection_line(event, self._address_changed(event))):
                 self._pending.append(line)
-        elif outputs := self.render(event):
-            self._told_asleep = False
-            self._pending.extend(outputs)
+        else:
+            self._pending.extend(self.render(event))
 
     def _address_changed(self, event: ev.ConnectionChanged) -> bool:
         if event.state != ev.ConnectionState.CONNECTED or event.address == self._address:

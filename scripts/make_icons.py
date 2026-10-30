@@ -54,7 +54,6 @@ GLYPHS = {
     "settings": ("settings", LIGHT),
     "notif_thread": ("notifications", GOLD),
     "notif_dm": ("mail", USEFUL),
-    "notif_off": ("notifications_off", GREY),
     "error": ("cancel", RED),
     "info": ("info", BLURPLE),
     "signup": ("edit_note", GREEN),

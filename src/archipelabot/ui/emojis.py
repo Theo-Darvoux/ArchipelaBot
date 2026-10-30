@@ -42,7 +42,6 @@ FALLBACKS: dict[str, str] = {
     "settings": "⚙️",
     "notif_thread": "🔔",
     "notif_dm": "📬",
-    "notif_off": "🔕",
     "error": "❌",
     "info": "\N{INFORMATION SOURCE}\N{VARIATION SELECTOR-16}",
     "signup": "📝",

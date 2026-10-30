@@ -5,7 +5,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from ...errors import UserError
-from ...storage.claims import NotifMode
 from ...storage.pings import ItemPing
 from ..autocomplete import item_autocomplete, slot_autocomplete
 from ..components import Tone, notice
@@ -18,17 +17,6 @@ from ..types import Interaction
 
 if TYPE_CHECKING:
     from ...bot import ArchipelaBot
-
-NOTIF_LABELS = {
-    NotifMode.THREAD: "Mention",
-    NotifMode.DM: "Message privé",
-    NotifMode.OFF: "Rien",
-}
-NOTIF_ICONS = {NotifMode.THREAD: "notif_thread", NotifMode.DM: "notif_dm", NotifMode.OFF: "notif_off"}
-
-
-def notif_label(mode: NotifMode) -> str:
-    return f"{E.get(NOTIF_ICONS[mode])} **{NOTIF_LABELS[mode]}**"
 
 
 class ClaimCog(commands.Cog, name="claim"):
@@ -116,23 +104,6 @@ class ClaimCog(commands.Cog, name="claim"):
             raise UserError(f"Aucun item **{md(item)}** dans {games}.")
         note = f"{E.ping} Ajouté : {', '.join(added)}."
         await interaction.response.send_message(view=PingsView(runtime, user, note), ephemeral=True)
-
-    @app_commands.command(name="notifs", description="Où arrivent tes pings d'items (/ping)")
-    @app_commands.describe(mode="Laisser vide pour voir le réglage actuel")
-    @app_commands.choices(
-        mode=[app_commands.Choice(name=label, value=mode.value) for mode, label in NOTIF_LABELS.items()]
-    )
-    async def notifs(self, interaction: Interaction, mode: app_commands.Choice[str] | None = None) -> None:
-        user = interaction.user.id
-        if mode is None:
-            current = self.bot.notif_prefs.mode(user)
-            text = f"Quand un item que tu attends (`/ping`) arrive : {notif_label(current)}."
-            text += "\n-# `/notifs mode:` pour changer."
-            await interaction.response.send_message(view=notice(text), ephemeral=True)
-            return
-        await self.bot.notif_prefs.set(user, NotifMode(mode.value))
-        text = f"Quand un item que tu attends (`/ping`) arrive : {notif_label(NotifMode(mode.value))}."
-        await interaction.response.send_message(view=notice(text, Tone.SUCCESS), ephemeral=True)
 
 
 async def setup(bot: "ArchipelaBot") -> None:

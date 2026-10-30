@@ -8,7 +8,7 @@ import discord
 from discord import ui
 
 from ..storage.rooms import RoomSettings
-from .components import Tone, notice
+from .components import Tone, View, notice
 from .emojis import E
 from .render.text import md
 
@@ -30,20 +30,31 @@ SETTING_TOGGLES: list[tuple[str, str, str, str]] = [
 ]
 
 
-class SettingsView(ui.LayoutView):
-    def __init__(self, room_name: str, settings: RoomSettings, save: Callable[[RoomSettings], Awaitable[None]]) -> None:
+class SettingsView(View):
+    def __init__(
+        self,
+        room_name: str,
+        settings: RoomSettings,
+        save: Callable[[RoomSettings], Awaitable[None]],
+        actions: Callable[[], list[ui.Button]] | None = None,
+    ) -> None:
         super().__init__(timeout=600)
         self.room_name = room_name
         self.settings = settings
         self.save = save
+        self.actions = actions
         self._build()
 
     def _build(self) -> None:
         self.clear_items()
-        container = ui.Container(
+        container = ui.Container(ui.TextDisplay(f"### {E.settings} Gérer · {md(self.room_name)}"))
+        if self.actions:
+            container.add_item(ui.ActionRow(*self.actions()))
+            container.add_item(ui.Separator())
+        container.add_item(
             ui.TextDisplay(
-                f"### {E.settings} Réglages · {md(self.room_name)}\n-# Ce qui s'affiche dans le suivi complet ; "
-                "le post de la room ne garde que le chat, les goals et les pings."
+                "**Ce qu'affiche le suivi complet**\n"
+                "-# Le post de la room ne garde que le chat, les goals et les pings."
             )
         )
         for name, icon, label, help_text in SETTING_TOGGLES:

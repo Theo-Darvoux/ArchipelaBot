@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import discord
-import pytest
-from discord import app_commands
 
 from archipelabot.errors import UserError
+from archipelabot.ui.config import ConfigView
 from archipelabot.ui.forum import TAG_SPECS, RoomTag, ensure_room_tags
 
 from .fakes import (
@@ -31,51 +31,71 @@ async def test_ensure_room_tags_creates_only_missing():
     assert set(tags) == set(TAG_SPECS)
 
 
-async def test_set_forum_saves_config_and_creates_tags(bot):
+async def open_config(bot, guild=None) -> ConfigView:
     cog = bot.get_cog("config")
-    forum = FakeForum(id=555)
-    interaction = FakeInteraction()
+    interaction = FakeInteraction(guild=guild or FakeGuild())
+    await cog.config.callback(cog, interaction)
+    [reply] = interaction.replies
+    assert reply["ephemeral"]
+    reply["view"].to_components()
+    return reply["view"]
 
-    await cog.set_forum.callback(cog, interaction, forum)
+
+SELECT_TYPES = (discord.ui.Select, discord.ui.ChannelSelect, discord.ui.RoleSelect)
+SELECTS = ["forum", "suivi", "recap", "apworlds", "annonces", "creation"]
+
+
+async def choose(view: ConfigView, which: str, *values, guild=None) -> str:
+    """Pick values in one of the panel's menus; the panel's text afterwards."""
+    selects = [i for i in view.walk_children() if isinstance(i, SELECT_TYPES)]
+    select = selects[SELECTS.index(which)]
+    select._values = list(values)
+    interaction = FakeInteraction(guild=guild or FakeGuild())
+    await select.callback(interaction)
+    assert interaction.edited[0]["view"] is view
+    return view_text(view)
+
+
+async def test_set_forum_saves_config_and_creates_tags(bot):
+    forum = FakeForum(id=555)
+    guild = FakeGuild(channels={555: forum})
+    view = await open_config(bot, guild)
+    assert "**Forum des parties** · *aucun*" in view_text(view)
+
+    text = await choose(view, "forum", SimpleNamespace(id=555), guild=guild)
 
     assert (await bot.guild_configs.get(1)).forum_id == 555
     assert len(forum.available_tags) == 6
-    [reply] = interaction.replies
-    assert reply["ephemeral"] and "<#555>" in view_text(reply["view"])
+    assert "Les parties seront postées dans <#555>." in text and "**Forum des parties** · <#555>" in text
 
 
 async def test_set_forum_refuses_without_permissions(bot):
-    cog = bot.get_cog("config")
     forum = FakeForum(permissions=discord.Permissions(view_channel=True, send_messages_in_threads=True))
+    guild = FakeGuild(channels={forum.id: forum})
+    view = await open_config(bot, guild)
 
-    with pytest.raises(UserError, match="manage_channels") as exc:
-        await cog.set_forum.callback(cog, FakeInteraction(), forum)
+    text = await choose(view, "forum", SimpleNamespace(id=forum.id), guild=guild)
 
-    assert "create_public_threads" in str(exc.value)
+    assert "⚠️ Il me manque des permissions" in text and "manage_channels" in text and "create_public_threads" in text
     assert (await bot.guild_configs.get(1)).forum_id is None
 
 
 async def test_recap_channel_set_and_cleared(bot):
-    cog = bot.get_cog("config")
-
-    class Channel:
-        id = 7
-        mention = "<#7>"
-
-    await cog.set_recap.callback(cog, FakeInteraction(), Channel())
+    channel = SimpleNamespace(id=7, mention="<#7>")
+    view = await open_config(bot)
+    await choose(view, "recap", channel, guild=FakeGuild(channels={7: channel}))
     assert (await bot.guild_configs.get(1)).recap_channel_id == 7
 
-    interaction = FakeInteraction()
-    await cog.set_recap.callback(cog, interaction, None)
+    text = await choose(view, "recap")
     assert (await bot.guild_configs.get(1)).recap_channel_id is None
-    assert "uniquement" in view_text(interaction.replies[0]["view"])
+    assert "uniquement" in text
 
 
-async def test_show_points_to_setup_when_unconfigured(bot):
-    cog = bot.get_cog("config")
-    interaction = FakeInteraction()
-    await cog.show.callback(cog, interaction)
-    assert "/config forum" in view_text(interaction.replies[0]["view"])
+async def test_unconfigured_panel(bot):
+    text = view_text(await open_config(bot))
+    for label in ("Forum des parties", "Suivi complet", "Récaps", "Apworlds"):
+        assert f"**{label}** · *aucun*" in text
+    assert "**Annonces** · *personne*" in text
 
 
 async def test_user_errors_are_shown_ephemerally(bot):
@@ -86,19 +106,12 @@ async def test_user_errors_are_shown_ephemerally(bot):
 
 
 async def test_ping_role_set_and_cleared(bot):
-    cog = bot.get_cog("config")
-
-    class Role:
-        id = 9
-        mention = "<@&9>"
-
-    await cog.set_ping_role.callback(cog, FakeInteraction(), Role())
+    view = await open_config(bot)
+    text = await choose(view, "annonces", SimpleNamespace(id=9, mention="<@&9>"))
     assert (await bot.guild_configs.get(1)).ping_role_id == 9
-    interaction = FakeInteraction()
-    await cog.show.callback(cog, interaction)
-    assert "<@&9>" in view_text(interaction.replies[0]["view"])
+    assert "**Annonces** · <@&9>" in text
 
-    await cog.set_ping_role.callback(cog, FakeInteraction(), None)
+    await choose(view, "annonces")
     assert (await bot.guild_configs.get(1)).ping_role_id is None
 
 
@@ -128,7 +141,6 @@ def posted(channel_id, user, day, *attachments) -> FakeUserMessage:
 
 
 async def test_apworld_channel_is_imported_then_followed(bot):
-    cog = bot.get_cog("config")
     spire = FakeAttachment("spire.apworld", apworld("spire", "Slay the Spire"))
     channel = ApworldChannel(
         [
@@ -139,14 +151,12 @@ async def test_apworld_channel_is_imported_then_followed(bot):
             posted(8, 5, 18, FakeAttachment("spire_copy.apworld", spire.content)),
         ]
     )
-    with pytest.raises(UserError, match="read_message_history"):
-        await cog.set_apworlds.callback(
-            cog, FakeInteraction(), ApworldChannel([], discord.Permissions(view_channel=True))
-        )
+    view = await open_config(bot)
+    closed = ApworldChannel([], discord.Permissions(view_channel=True))
+    text = await choose(view, "apworlds", closed, guild=FakeGuild(channels={8: closed}))
+    assert "read_message_history" in text and (await bot.guild_configs.get(1)).apworld_channel_id is None
 
-    interaction = FakeInteraction()
-    await cog.set_apworlds.callback(cog, interaction, channel)
-    text = view_text(interaction.followup.sent[0]["view"])
+    text = await choose(view, "apworlds", channel, guild=FakeGuild(channels={8: channel}))
     assert "3 nouveaux, 1 déjà sur le serveur" in text and "`broken.apworld` : ce n'est pas un apworld valide" in text
     assert (await bot.guild_configs.get(1)).apworld_channel_id == 8
     library = await bot.games.apworlds.library(1, ["Hacknet", "Slay the Spire"])
@@ -167,23 +177,18 @@ async def test_apworld_channel_is_imported_then_followed(bot):
     await listener.on_message(message)
     assert not message.reactions and await bot.games.apworlds.library(1, ["Other"]) == []
 
-    interaction = FakeInteraction()
-    await cog.show.callback(cog, interaction)
-    assert "**Salon des apworlds** : <#8>" in view_text(interaction.replies[0]["view"])
-    await cog.set_apworlds.callback(cog, FakeInteraction(), None)
+    assert "**Apworlds** · <#8>" in text
+    await choose(view, "apworlds")
     assert (await bot.guild_configs.get(1)).apworld_channel_id is None
 
 
 async def test_creation_restricted_to_admins_then_reopened(bot):
-    cog = bot.get_cog("config")
-
-    interaction = FakeInteraction()
-    await cog.set_creation.callback(cog, interaction, app_commands.Choice(name="Admins uniquement", value="admins"))
+    view = await open_config(bot)
+    text = await choose(view, "creation", "admins")
     assert (await bot.guild_configs.get(1)).admin_only_games
-    assert "Seuls les admins" in view_text(interaction.replies[0]["view"])
-    interaction = FakeInteraction()
-    await cog.show.callback(cog, interaction)
-    assert "**Création des parties** : admins uniquement" in view_text(interaction.replies[0]["view"])
+    assert "Seuls les admins" in text
+    creation = [i for i in view.walk_children() if isinstance(i, discord.ui.Select)][-1]
+    assert [o.default for o in creation.options] == [False, True]
 
-    await cog.set_creation.callback(cog, FakeInteraction(), app_commands.Choice(name="Tous les membres", value="all"))
+    await choose(view, "creation", "all")
     assert not (await bot.guild_configs.get(1)).admin_only_games

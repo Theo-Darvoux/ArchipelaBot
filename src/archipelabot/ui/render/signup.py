@@ -114,6 +114,7 @@ def signup_view(
     host_command: str | None = None,
     ping_role_id: int | None = None,
     buttons: list[ui.Item] | None = None,
+    can_check: bool = False,
     apworlds: Sequence[Attached] = (),
     missing: Sequence[str] = (),
     conflicts: Sequence[str] = (),
@@ -139,6 +140,13 @@ def signup_view(
         f"**3.** Il lance ensuite {track_command} ici avec le lien de la room : ce message devient le suivi de la "
         "partie et chacun est relié à son slot."
     )
+    organiser = f"{E.settings} **Gérer** : modifier la partie, corriger les yamls de n'importe qui, ou l'annuler"
+    if can_check:
+        organiser = (
+            f"{E.reachable} **Vérifier** : teste chaque yaml avec les apworlds de la partie, comme à la génération "
+            "(options invalides qui la feraient échouer, options inconnues de l'apworld) · " + organiser
+        )
+    steps += f"\n-# Pour l'organisateur et les modérateurs · {organiser}."
     if host_command:
         steps += (
             f"\n-# Ou, à la place des étapes 2 et 3, {host_command} : le bot génère la partie et l'{E.host} héberge "
@@ -150,7 +158,7 @@ def signup_view(
     people = len({f.user_id for f in files})
     count = plural(people, "joueur") + (f" · {plural(slots, 'slot')}" if slots != people else "")
     title = f"### {E.signup} Inscrits" + (f" · {count}" if files else "") + "\n"
-    budget = TEXT_LIMIT - len(header) - len(title) - len(apworlds_text) - (0 if cancelled else len(steps))
+    budget = TEXT_LIMIT - len(header) - len(title) - len(apworlds_text) - (0 if cancelled else len(steps)) - 4
     view = ui.LayoutView(timeout=None)
     view.add_item(
         ui.Container(

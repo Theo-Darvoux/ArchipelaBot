@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import discord
-import pytest
 
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
@@ -11,7 +10,6 @@ from archipelabot.core import events as ev
 from archipelabot.core.logic import SlotLogic
 from archipelabot.core.progress import Baseline, Progress
 from archipelabot.core.room import RoomState, SlotInfo
-from archipelabot.errors import UserError
 from archipelabot.recap.chart import render_chart
 from archipelabot.recap.stats import build_recap
 from archipelabot.storage.guilds import GuildConfig
@@ -20,8 +18,8 @@ from archipelabot.ui.emojis import E
 from archipelabot.ui.render.recap import duration, recap_view
 
 from .ap_server import requires_ap_server
-from .fakes import FakeInteraction, FakeUser, view_text
-from .test_track_cog import discord_env, track  # noqa: F401
+from .fakes import FakeInteraction, view_text
+from .test_track_cog import buttons_of, discord_env, room_manage, track  # noqa: F401
 
 T0 = datetime(2026, 10, 4, 20, 0, tzinfo=UTC)
 
@@ -154,12 +152,10 @@ async def test_recap_command_posts_in_the_thread(bot, discord_env, ap_server):  
     await bot.guild_configs.save(GuildConfig(guild.id, forum_id=forum.id, recap_channel_id=recap_channel.id))
     await track(bot, guild, lien=ap_server.address, slot="Alice")
     [thread] = forum.threads
-    cog = bot.get_cog("status")
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.recap.callback(cog, FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(5)))
-
-    interaction = FakeInteraction(guild=guild, channel_id=thread.id)
-    await cog.recap.callback(cog, interaction)
+    runtime = bot.rooms.by_thread(thread.id)
+    interaction = FakeInteraction(guild=guild)
+    interaction.client = bot
+    await buttons_of(await room_manage(bot, runtime))["Récap"].callback(interaction)
     assert "Récap publié" in view_text(interaction.followup.sent[0]["view"])
     assert any(m.text.startswith("## 🏆 Récap") for m in thread.messages)
     assert bot.rooms.by_thread(thread.id) is not None  # the room keeps being tracked
@@ -181,17 +177,14 @@ async def test_recap_of_a_stopped_room(bot, discord_env, ap_server):  # noqa: F8
     await carol.close()
     await bot.rooms.stop(runtime, "stopped")
 
-    cog = bot.get_cog("status")
-    interaction = FakeInteraction(
-        guild=guild, channel_id=thread.id, permissions=discord.Permissions(manage_threads=True)
-    )
-    await cog.recap.callback(cog, interaction)
+    assert "Seule la personne" in view_text(await room_manage(bot, runtime, user=5))
+    interaction = FakeInteraction(guild=guild)
+    interaction.client = bot
+    await buttons_of(await room_manage(bot, runtime))["Publier le récap"].callback(interaction)
+    assert "Récap publié" in view_text(interaction.followup.sent[0]["view"])
     [recap] = [m for m in thread.messages if m.text.startswith("## 🏆 Récap")]
     assert "Finie · 3 joueurs" in recap.text
     assert "🥇 **Carol** · *ChecksFinder* · en " in recap.text and "Alice · *Celeste 64* · 0 %" in recap.text
-
-    with pytest.raises(UserError, match="dans le post d'une room"):
-        await cog.recap.callback(cog, FakeInteraction(guild=guild, channel_id=12345))
 
 
 async def _until(predicate) -> None:

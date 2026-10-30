@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import discord
@@ -15,6 +16,7 @@ from archipelabot.ui.history import HistoryView, history_entries
 
 from .ap_server import requires_ap_server
 from .fakes import FakeForum, FakeInteraction, FakeUser, view_text
+from .test_config_cog import choose, open_config
 from .test_track_cog import CAROL, discord_env, track  # noqa: F401
 
 T0 = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
@@ -135,18 +137,15 @@ async def test_items_go_to_the_full_log_and_into_the_history(bot, log_env, ap_se
 
 async def test_config_log_forum(bot, log_env):
     guild, _, log_forum = log_env
-    cog = bot.get_cog("config")
-    interaction = FakeInteraction(guild=guild)
-    await cog.set_log_forum.callback(cog, interaction, salon=log_forum)
-    assert "suivi complet" in view_text(interaction.response.sent[0]["view"])
+    view = await open_config(bot, guild)
+    text = await choose(view, "suivi", SimpleNamespace(id=log_forum.id), guild=guild)
+    assert "suivi complet dans <#200>" in text and "**Suivi complet** · <#200>" in text
     assert (await bot.guild_configs.get(guild.id)).log_forum_id == log_forum.id
 
     log_forum.permissions = discord.Permissions(view_channel=True)
-    with pytest.raises(UserError, match="send_messages"):
-        await cog.set_log_forum.callback(cog, FakeInteraction(guild=guild), salon=log_forum)
+    text = await choose(view, "suivi", SimpleNamespace(id=log_forum.id), guild=guild)
+    assert "⚠️" in text and "send_messages" in text
 
-    await cog.set_log_forum.callback(cog, FakeInteraction(guild=guild), salon=None)
+    text = await choose(view, "suivi", guild=guild)
     assert (await bot.guild_configs.get(guild.id)).log_forum_id is None
-    interaction = FakeInteraction(guild=guild)
-    await cog.show.callback(cog, interaction)
-    assert "**Suivi complet** : *aucun*" in view_text(interaction.response.sent[0]["view"])
+    assert "**Suivi complet** · *aucun*" in text

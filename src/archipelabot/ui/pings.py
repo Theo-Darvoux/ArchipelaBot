@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 MAX_SHOWN = 10  # three components each, out of 40
 
 MODE_NOTES = {
-    NotifMode.THREAD: "-# Le bot te mentionnera dans le post de la room. `/notifs` pour recevoir ça en DM.",
-    NotifMode.DM: "-# Le bot t'enverra un message privé. `/notifs` pour changer.",
-    NotifMode.OFF: "⚠️ Tes pings sont coupés : `/notifs` pour les réactiver.",
+    NotifMode.THREAD: "-# Le bot te mentionnera dans le post de la room.",
+    NotifMode.DM: "-# Le bot t'enverra un message privé.",
 }
+SWITCH = {NotifMode.THREAD: (NotifMode.DM, "Recevoir en DM"), NotifMode.DM: (NotifMode.THREAD, "Recevoir en mention")}
 
 
 class PingsView(ui.LayoutView):
@@ -52,9 +52,18 @@ class PingsView(ui.LayoutView):
             container.add_item(ui.Section(ui.TextDisplay(line), accessory=button))
         if len(mine) > MAX_SHOWN:
             container.add_item(ui.TextDisplay(f"-# … et {len(mine) - MAX_SHOWN} autres"))
-        if mine:
-            container.add_item(ui.TextDisplay(MODE_NOTES[self.runtime.prefs.mode(self.user_id)]))
+        mode = self.runtime.prefs.mode(self.user_id)
+        switch = ui.Button(label=SWITCH[mode][1], emoji=E.partial(f"notif_{SWITCH[mode][0].value}"))
+        switch.callback = self._switch
+        container.add_item(ui.Section(ui.TextDisplay(MODE_NOTES[mode]), accessory=switch))
         self.add_item(container)
+
+    async def _switch(self, interaction: "Interaction") -> None:
+        prefs = self.runtime.prefs
+        await prefs.set(self.user_id, SWITCH[prefs.mode(self.user_id)][0])
+        self.note = ""
+        self._build()
+        await interaction.response.edit_message(view=self)
 
     def _remove(self, ping: ItemPing) -> Callable[["Interaction"], Awaitable[None]]:
         async def callback(interaction: "Interaction") -> None:

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from discord import app_commands
 from discord.ext import commands
 
-from ..render.help import help_view
+from ..render.help import HelpView
 from ..types import Interaction
 
 if TYPE_CHECKING:
@@ -16,7 +16,7 @@ class HelpCog(commands.Cog, name="help"):
 
     @app_commands.command(name="help", description="Comment fonctionne le bot et ce que fait chaque commande")
     async def help(self, interaction: Interaction) -> None:
-        await interaction.response.send_message(view=help_view(self.bot.command_mention), ephemeral=True)
+        await interaction.response.send_message(view=HelpView(self.bot.command_mention), ephemeral=True)
 
 
 async def setup(bot: "ArchipelaBot") -> None:

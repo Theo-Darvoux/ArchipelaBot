@@ -7,16 +7,13 @@ from discord.ext import commands
 
 from ...core.logic import MAX_SPOILER, LogicError, read_spoiler
 from ...errors import UserError
-from ..apworlds import GameApworldsView
 from ..components import Tone, notice
 from ..emojis import E
-from ..forum import TAG_SPECS, RoomTag
 from ..games import check_can_create
 from ..launch import launch_room
 from ..render.text import md, plural
 from ..rooms import RoomRuntime
 from ..types import Interaction
-from ..views import ConfirmView
 
 if TYPE_CHECKING:
     from ...bot import ArchipelaBot
@@ -75,75 +72,6 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
         if not runtime.can_manage(interaction.user.id, interaction.permissions):
             raise UserError("Seule la personne qui a lancé le suivi (ou un modérateur) peut faire ça.")
 
-    @app_commands.command(name="stop", description="Arrêter le suivi de cette room")
-    async def stop(self, interaction: Interaction) -> None:
-        runtime = self._room_here(interaction)
-        self._check_manager(interaction, runtime)
-
-        def stopped_already() -> bool:
-            return self.bot.rooms.get(runtime.record.id) is not runtime
-
-        async def stop_with_recap() -> str:
-            if stopped_already():
-                return f"{E.stopped} Ce suivi est déjà arrêté."
-            try:
-                await self.bot.rooms.publish_recap(runtime, announce=True)
-                text = f"{E.stopped} Suivi arrêté, récap publié."
-            except Exception:
-                log.exception("Could not publish the recap of room %s", runtime.record.id)
-                text = f"{E.stopped} Suivi arrêté, mais le récap n'a pas pu être publié."
-            await self.bot.rooms.stop(runtime, "finished")
-            return text
-
-        async def stop() -> str:
-            if stopped_already():
-                return f"{E.stopped} Ce suivi est déjà arrêté."
-            await self.bot.rooms.stop(runtime, "stopped")
-            return f"{E.stopped} Suivi arrêté. Le post reste consultable."
-
-        async def back_to_signup() -> str:
-            if game is None or not await self.bot.rooms.discard(runtime):
-                return f"{E.stopped} Ce suivi est déjà arrêté."
-            await self.bot.games.reopen(game)
-            try:
-                text = f"{E.signup} Suivi annulé : retour aux inscriptions. Relance {start_command} avec le bon lien."
-                await runtime.sink.send_view(notice(text))
-            except discord.HTTPException:
-                log.warning("Could not announce the return to sign-ups of game %s", game.id, exc_info=True)
-            return f"{E.signup} Retour aux inscriptions : les yamls sont toujours là."
-
-        game = await self.bot.games.repo.started_in(runtime.record.thread_id or 0)
-        start_command = self.bot.command_mention("track start")
-        actions = [
-            ("Arrêter et publier le récap", discord.ButtonStyle.primary, stop_with_recap),
-            ("Arrêter sans récap", discord.ButtonStyle.danger, stop),
-        ]
-        question = (
-            f"Arrêter le suivi de **{runtime.record.name}** ?\n-# Le post restera consultable, avec le tag "
-            f"{' '.join(TAG_SPECS[RoomTag.FINISHED][::-1])}."
-        )
-        if runtime.record.hosting:
-            question += "\n-# Le bot héberge cette partie : son serveur sera arrêté, personne ne pourra plus jouer."
-        if game is not None:
-            actions.append(("Revenir aux inscriptions", discord.ButtonStyle.secondary, back_to_signup))
-            question += (
-                "\n-# **Revenir aux inscriptions** : mauvais lien ou partie à regénérer. Le suivi est oublié (pas de "
-                f"récap), les yamls restent, et tu pourras relancer {start_command}."
-                + (" La seed hébergée est supprimée." if runtime.record.hosting else "")
-            )
-        view = ConfirmView(question, actions)
-        await interaction.response.send_message(view=view, ephemeral=True)
-
-    @app_commands.command(name="reconnect", description="Relancer tout de suite la connexion de cette room")
-    @app_commands.describe(mot_de_passe="Nouveau mot de passe du serveur, s'il a changé")
-    async def reconnect(self, interaction: Interaction, mot_de_passe: str | None = None) -> None:
-        runtime = self._room_here(interaction)
-        self._check_manager(interaction, runtime)
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.bot.rooms.reconnect(runtime, mot_de_passe)
-        text = f"{E.reconnecting} Reconnexion lancée : le panneau de la room affiche le résultat."
-        await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
-
     @app_commands.command(name="logique", description="Savoir qui est bloqué et combien de checks chacun peut faire")
     @app_commands.describe(spoiler="Le spoiler log de la génération (AP_…_Spoiler.txt) ou le zip AP_….zip")
     async def logic(self, interaction: Interaction, spoiler: discord.Attachment) -> None:
@@ -173,22 +101,6 @@ class TrackCog(commands.GroupCog, name="track", group_name="track", group_descri
             text += f"\n-# Bloqués en ce moment : {', '.join(blocked)}."
         tone = Tone.WARNING if from_room else Tone.SUCCESS
         await interaction.followup.send(view=notice(text, tone), ephemeral=True)
-
-    @app_commands.command(name="apworlds", description="Choisir les apworlds qui ont servi à générer cette partie")
-    async def apworlds(self, interaction: Interaction) -> None:
-        runtime = self._room_here(interaction)
-        self._check_manager(interaction, runtime)
-        game = await self.bot.games.repo.started_in(runtime.record.thread_id or 0)
-        if game is None:
-            raise UserError("Seulement pour une room lancée depuis le post d'une partie (`/partie nouvelle`).")
-        view = await GameApworldsView.create(self.bot.games, game)
-        await interaction.response.send_message(view=view, ephemeral=True)
-
-    @app_commands.command(name="reglages", description="Choisir ce qui est affiché dans le suivi complet de la room")
-    async def settings(self, interaction: Interaction) -> None:
-        runtime = self._room_here(interaction)
-        self._check_manager(interaction, runtime)
-        await interaction.response.send_message(view=runtime.settings_view(), ephemeral=True)
 
 
 async def setup(bot: "ArchipelaBot") -> None:

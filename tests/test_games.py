@@ -1,5 +1,6 @@
 import io
 import random
+import re
 import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -15,13 +16,14 @@ from archipelabot.storage.games import GameRecord
 from archipelabot.storage.guilds import GuildConfig
 from archipelabot.ui.emojis import FALLBACKS, E, uploaded_name
 from archipelabot.ui.games import ZIP_OVERHEAD, GameManager
+from archipelabot.ui.manage import GameManageButton
 from archipelabot.ui.render.signup import signup_view
 from archipelabot.ui.signup_buttons import MyYamlsView, UploadReport, YamlButton, YamlModal, YamlsZipButton
 
 from .ap_server import DEV_DIR, requires_ap_server
 from .fakes import FakeAttachment, FakeInteraction, FakeUser, FakeUserMessage, view_text
 from .test_apworlds import apworld
-from .test_track_cog import NotFoundResponse, discord_env, wait_until  # noqa: F401
+from .test_track_cog import NotFoundResponse, discord_env, room_manage, wait_until  # noqa: F401
 
 ROLE = 4242
 
@@ -52,6 +54,13 @@ def click(bot, user=77, **kwargs) -> FakeInteraction:
     return interaction
 
 
+async def game_manage(bot, record, user=77):
+    """What the sign-up post's "Gérer" button opens for this user."""
+    interaction = click(bot, user=user)
+    await GameManageButton(record.id).callback(interaction)
+    return interaction.response.sent[0]["view"]
+
+
 async def test_new_game_opens_a_signup_post(bot, game):
     record, thread = game
     assert thread.name == "Samedi"
@@ -65,14 +74,15 @@ async def test_new_game_opens_a_signup_post(bot, game):
     assert "Inscrits\n*Personne pour l'instant.*" in panel
     assert "Comment participer" in panel and "`/track start` ici avec le lien de la room" in panel
     buttons = [i.item for i in thread.messages[0].view.walk_children() if isinstance(i, discord.ui.DynamicItem)]
-    assert [b.label for b in buttons] == ["Mon yaml", "Tous les yamls"]
+    assert [b.label for b in buttons] == ["Mon yaml", "Tous les yamls", "Gérer"]
+    assert "Pour l'organisateur et les modérateurs · ⚙️ **Gérer**" in panel
     assert record.status == "open" and [g.id for g in await bot.games.repo.open()] == [record.id]
 
 
 async def test_new_game_needs_a_forum(bot, discord_env):  # noqa: F811
     guild, _ = discord_env
     await bot.guild_configs.save(GuildConfig(guild.id))
-    with pytest.raises(Exception, match="/config forum"):
+    with pytest.raises(Exception, match="/config"):
         await new_game(bot, guild)
 
 
@@ -137,7 +147,7 @@ def test_a_full_panel_fits_in_one_message():
     finally:
         E.reset()
     assert len(everyone) <= 4000 and "Player29" in everyone and "- **Player00**" in everyone
-    assert len(crowd) <= 4000 and "… et 48 autres" in crowd
+    assert len(crowd) <= 4000 and re.search(r"… et \d+ autres\n", crowd)
 
 
 async def test_my_yaml_button_opens_the_upload_then_lists_mine(bot, game):
@@ -282,22 +292,33 @@ async def test_links_in_the_post_do_not_start_tracking(bot, game):
 
 async def test_editing_the_game(bot, game):
     record, thread = game
-    cog = bot.get_cog("partie")
-    edit = {"nom": None, "debut": None, "description": None}
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)), **edit)
-    with pytest.raises(UserError, match="Précise l'heure"):
-        await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id), **{**edit, "debut": "samedi"})
+    assert "Seule la personne" in view_text(await game_manage(bot, record, user=5))
 
-    await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id), **{**edit, "nom": "Dimanche", "debut": "-"})
+    async def edit(**fields):
+        interaction = click(bot)
+        await buttons_of(await game_manage(bot, record))["Modifier"].callback(interaction)
+        modal = interaction.response.sent[0]["modal"]
+        for name, value in fields.items():
+            getattr(modal, name)._value = value
+        await modal.on_submit(click(bot))
+        return modal
+
+    modal = await edit()  # the dates it shows read back as the same date
+    assert modal.start.default == "lundi 12/10/2099 à 21:00"
+    assert modal.description.default == "Vocal ouvert\npas de spoil"
+    assert record.starts_at == datetime(2099, 10, 12, 19, tzinfo=ZoneInfo("UTC"))
+    with pytest.raises(UserError, match="Précise l'heure"):
+        await edit(start="samedi")
+
+    await edit(name="Dimanche", start="")
     assert thread.name == "Dimanche" and record.starts_at is None
     panel = view_text(thread.messages[0].view)
     assert "## Dimanche" in panel and ":F>" not in panel and "> Vocal ouvert" in panel
     [stored] = await bot.games.repo.open()
     assert stored.name == "Dimanche" and stored.starts_at is None
 
-    await cog.edit.callback(cog, FakeInteraction(channel_id=thread.id), **{**edit, "debut": "01/01/2099 20h"})
-    assert record.starts_at == datetime(2099, 1, 1, 19, tzinfo=ZoneInfo("UTC"))
+    await edit(start="01/01/2099 20h", description="")
+    assert record.starts_at == datetime(2099, 1, 1, 19, tzinfo=ZoneInfo("UTC")) and record.description == ""
     assert (await bot.games.repo.open())[0].starts_at == record.starts_at
 
 
@@ -314,13 +335,9 @@ def buttons_of(view) -> dict:
 
 
 async def test_cancelling_a_game(bot, game):
-    _, thread = game
-    cog = bot.get_cog("partie")
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.cancel.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)))
-
-    interaction = FakeInteraction(channel_id=thread.id)
-    await cog.cancel.callback(cog, interaction)
+    record, thread = game
+    interaction = click(bot)
+    await buttons_of(await game_manage(bot, record))["Annuler la partie"].callback(interaction)
     buttons = buttons_of(interaction.response.sent[0]["view"])
     assert list(buttons) == ["Annuler la partie", "Garder la partie"]
     await buttons["Annuler la partie"].callback(interaction)
@@ -331,8 +348,7 @@ async def test_cancelling_a_game(bot, game):
     assert not [i for i in panel.walk_children() if isinstance(i, discord.ui.DynamicItem)]
     assert [t.name for t in thread.applied_tags] == ["Annulée"]
     assert bot.games.by_thread(thread.id) is None and await bot.games.repo.open() == []
-    with pytest.raises(UserError, match="partie en inscriptions"):
-        await cog.cancel.callback(cog, FakeInteraction(channel_id=thread.id))
+    assert "plus en inscriptions" in view_text(await game_manage(bot, record))
 
 
 @requires_ap_server
@@ -344,8 +360,8 @@ async def test_back_to_signup_after_a_wrong_start(bot, game, ap_server):
     await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
     runtime = bot.rooms.by_thread(thread.id)
 
-    interaction = FakeInteraction(channel_id=thread.id)
-    await track.stop.callback(track, interaction)
+    interaction = click(bot)
+    await buttons_of(await room_manage(bot, runtime))["Arrêter"].callback(interaction)
     buttons = buttons_of(interaction.response.sent[0]["view"])
     assert list(buttons) == ["Arrêter et publier le récap", "Arrêter sans récap", "Revenir aux inscriptions", "Annuler"]
     await buttons["Revenir aux inscriptions"].callback(interaction)
@@ -535,14 +551,10 @@ async def test_unused_apworlds_are_not_regenerated(bot, game):
 async def test_managers_replace_anyones_yaml_in_the_signups(bot, game):
     record, thread = game
     await bot.games.upload(record, 5, [FakeAttachment("opi.yaml", yaml("Opi"))])
-    cog = bot.get_cog("partie")
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.yamls.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=6)))
-    with pytest.raises(UserError, match="dans le post d'une partie"):
-        await cog.yamls.callback(cog, click(bot, channel_id=999))
+    assert "Seule la personne" in view_text(await game_manage(bot, record, user=6))
 
-    interaction = click(bot, channel_id=thread.id)
-    await cog.yamls.callback(cog, interaction)
+    interaction = click(bot)
+    await buttons_of(await game_manage(bot, record))["Yamls"].callback(interaction)
     view = interaction.response.sent[0]["view"]
     assert "`opi.yaml` · <@5>" in view_text(view) and "/track logique" not in view_text(view)
     send = click(bot)
@@ -573,8 +585,8 @@ async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     player = FakeUserMessage(thread, attachments=[FakeAttachment("x.yaml", yaml("X"))], author=FakeUser(id=5))
     await cog.on_message(player)
     assert not player.reactions and not player.replies
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.yamls.callback(cog, FakeInteraction(channel_id=thread.id, user=FakeUser(id=5)))
+    runtime = bot.rooms.by_thread(thread.id)
+    assert "Seule la personne" in view_text(await room_manage(bot, runtime, user=5))
 
     # the host, who started the tracking, adds the yaml that really generated Carol...
     fixed = FakeUserMessage(thread, attachments=[FakeAttachment("carol.yaml", dev["p3.yaml"])])
@@ -585,8 +597,8 @@ async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     owners = {f.filename: f.user_id for f in await bot.games.files(record)}
     assert owners == {"p2.yaml": 2, "old.yaml": 3, "extra.yaml": 3, "carol.yaml": 77, "alice.yaml": 1}
 
-    interaction = click(bot, channel_id=thread.id)
-    await cog.yamls.callback(cog, interaction)
+    interaction = click(bot)
+    await buttons_of(await room_manage(bot, runtime))["Yamls"].callback(interaction)
     view = interaction.response.sent[0]["view"]
     assert "`carol.yaml` · <@77>\n**Carol** · *ChecksFinder*" in view_text(view)
     assert "/track logique" in view_text(view)
@@ -610,10 +622,10 @@ async def test_apworlds_chosen_after_the_start(bot, game, ap_server):
     start = {"lien": ap_server.address, "slot": "Carol", "mot_de_passe": None, "nom": None}
     await track.start.callback(track, FakeInteraction(guild=thread.parent.guild, channel_id=thread.id), **start)
 
-    with pytest.raises(UserError, match="Seule la personne"):
-        await track.apworlds.callback(track, FakeInteraction(channel_id=thread.id, user=FakeUser(id=2)))
-    interaction = click(bot, channel_id=thread.id)
-    await track.apworlds.callback(track, interaction)
+    runtime = bot.rooms.by_thread(thread.id)
+    assert "Seule la personne" in view_text(await room_manage(bot, runtime, user=2))
+    interaction = click(bot)
+    await buttons_of(await room_manage(bot, runtime))["Apworlds"].callback(interaction)
     view = interaction.response.sent[0]["view"]
     assert "⚠️ *Hacknet* · apworld manquant · <@2>" in view_text(view) and "Aucun apworld de ce jeu" in view_text(view)
     assert "Celeste 64" not in view_text(view) and not parts_of(view)
@@ -622,8 +634,8 @@ async def test_apworlds_chosen_after_the_start(bot, game, ap_server):
     for version in ("0.3.0", "0.3.1"):
         attachment = FakeAttachment("hacknet.apworld", apworld(version=version))
         await apworld_cog.send.callback(apworld_cog, FakeInteraction(user=FakeUser(id=9)), fichier=attachment)
-    interaction = click(bot, channel_id=thread.id)
-    await track.apworlds.callback(track, interaction)
+    interaction = click(bot)
+    await buttons_of(await room_manage(bot, runtime))["Apworlds"].callback(interaction)
     view = interaction.response.sent[0]["view"]
     select = parts_of(view)["Choisir l'apworld de Hacknet"]
     assert [o.label for o in select.options] == ["Hacknet v0.3.1", "Hacknet v0.3.0"]

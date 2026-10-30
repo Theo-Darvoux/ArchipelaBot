@@ -43,6 +43,7 @@ from ..storage.rooms import RoomRecord, RoomRepo, RoomStatus
 from .components import Tone, notice
 from .emojis import E
 from .forum import TAG_SPECS, Post, RoomTag, ensure_room_tags
+from .manage import can_manage
 from .panel_buttons import ClaimButton, MyHintsButton, PatchButton, SettingsButton
 from .render.feed import chat_event, feed_view, log_header, render_event
 from .render.panel import panel_view
@@ -53,7 +54,6 @@ from .services.logic import LogicService
 from .services.panel import PanelService
 from .services.pings import PingService
 from .services.progress import BaselineFetcher, ProgressService, restore_progress
-from .views import SettingsView
 
 if TYPE_CHECKING:
     from ..bot import ArchipelaBot
@@ -86,10 +86,6 @@ def slot_named(state: RoomState, name: str) -> int:
         if wanted in (info.name.casefold(), info.display.casefold()):
             return info.slot
     raise UserError(f"Aucun joueur nommé **{md(name)}** dans cette room.")
-
-
-def can_manage(record: RoomRecord, user_id: int, permissions: discord.Permissions) -> bool:
-    return user_id == record.created_by or permissions.manage_threads
 
 
 async def open_post(bot: "ArchipelaBot", thread_id: int) -> discord.Thread:
@@ -314,18 +310,11 @@ class RoomRuntime:
             kinds.insert(1, PatchButton)
         return kinds
 
-    def _buttons(self, *kinds: type[ui.DynamicItem]) -> list[ui.Item] | None:
-        return [kind(self.record.id) for kind in kinds] if self.active else None
+    def _buttons(self, *kinds: type[ui.DynamicItem]) -> list[ui.Item]:
+        return [kind(self.record.id) for kind in (kinds if self.active else (SettingsButton,))]
 
     def can_manage(self, user_id: int, permissions: discord.Permissions) -> bool:
         return can_manage(self.record, user_id, permissions)
-
-    def settings_view(self) -> SettingsView:
-        async def save(settings) -> None:
-            self.record.settings = settings
-            await self.repo.save_settings(self.record)
-
-        return SettingsView(self.record.name, self.record.settings.model_copy(), save)
 
     def slot_named(self, name: str) -> int:
         return slot_named(self.tracker.state, name)
@@ -546,7 +535,8 @@ class RoomManager:
                         [
                             *differences,
                             "- Deux regénérations sur le bot donnent les mêmes items : un apworld n'est sans doute pas "
-                            f"dans la version de l'hôte, vérifie avec {self.bot.command_mention('track apworlds')}.",
+                            f"dans la version de l'hôte, vérifie avec {E.settings} **Gérer** puis **Apworlds** sur "
+                            "le panneau.",
                         ],
                     )
                 await self._use_room_items(runtime, worker)

@@ -143,15 +143,14 @@ async def test_released_items_ping_too_and_each_user_once_per_message():
 
 
 async def test_ping_modes():
-    watched = {(2, "Hookshot"): [222, 333, 444]}
-    modes = {333: NotifMode.DM, 444: NotifMode.OFF}
+    watched = {(2, "Hookshot"): [222, 333]}
+    modes = {333: NotifMode.DM}
     pings, sink = ping_service(watched, modes)
     await pings.handle(item(1, 2, "Hookshot"))
     await pings.flush()
     assert sink.mentions == [(222,)]
     [dm] = sink.dms
     assert dm.startswith("333: ### 📬 Nouveaux items · Async\n🟣 **Hookshot** pour Bob\\_\\*x\\* · de Alice")
-    assert "444" not in "".join(sink.sent + sink.dms)
 
 
 def chat_feed(address="archipelago.gg:40000"):
@@ -159,7 +158,7 @@ def chat_feed(address="archipelago.gg:40000"):
     return FeedService(address, lambda e: chat_event(e, STATE, SETTINGS), sink, connections=True), sink
 
 
-async def test_feed_reports_only_sleep_and_address_changes():
+async def test_feed_reports_only_address_changes():
     feed, sink = chat_feed()
     conn = lambda state, port=40000: ev.ConnectionChanged(state, f"archipelago.gg:{port}")  # noqa: E731
 
@@ -170,10 +169,13 @@ async def test_feed_reports_only_sleep_and_address_changes():
     assert sink.sent == []  # same address: nothing worth a message
 
     await feed.handle(conn(ev.ConnectionState.ASLEEP))
+    await feed.flush()
+    assert sink.sent == []  # the room's tag says it, no message
+
     await feed.handle(conn(ev.ConnectionState.CONNECTED, 41000))
     await feed.flush()
     [message] = sink.sent
-    assert "endormie" in message and "nouveau lien · `archipelago.gg:41000`" in message
+    assert "nouveau lien · `archipelago.gg:41000`" in message
 
 
 async def test_the_full_log_says_nothing_about_the_connection():
@@ -183,21 +185,6 @@ async def test_the_full_log_says_nothing_about_the_connection():
     await feed.handle(item())
     await feed.flush()
     assert sink.sent == ["🟣 Alice → **Hookshot** → Bob\\_\\*x\\*\n-# Kakariko Well"]
-
-
-async def test_sleep_is_told_once_until_something_happens():
-    feed, sink = chat_feed(STATE.address)
-    conn = lambda state: ev.ConnectionChanged(state, STATE.address)  # noqa: E731
-    for _ in range(3):  # the room is woken up and falls asleep again every couple of hours
-        await feed.handle(conn(ev.ConnectionState.ASLEEP))
-        await feed.handle(conn(ev.ConnectionState.CONNECTED))
-    await feed.flush()
-    assert len(sink.sent) == 1
-
-    await feed.handle(ev.ChatMessage(1, "hop"))
-    await feed.handle(conn(ev.ConnectionState.ASLEEP))
-    await feed.flush()
-    assert "endormie" in sink.sent[-1]
 
 
 async def test_panel_edits_are_throttled_but_urgent_ones_go_fast():

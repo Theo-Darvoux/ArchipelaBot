@@ -37,7 +37,7 @@ class ApworldCog(commands.GroupCog, name="apworld", group_name="apworld", group_
             raise UserError("Impossible de télécharger le fichier.") from e
         text = (
             f"{E.apworld} {apworld_label(apworld)} est sur le serveur.\n-# Il sera proposé dans les inscriptions, et "
-            f"dans {self.bot.command_mention('track apworlds')} pour une partie déjà lancée."
+            f"dans {E.settings} **Gérer** puis **Apworlds** sur le panneau d'une partie déjà lancée."
         )
         await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
 

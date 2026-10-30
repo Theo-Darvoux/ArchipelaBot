@@ -6,7 +6,6 @@ from .db import Database
 class NotifMode(StrEnum):
     THREAD = "thread"
     DM = "dm"
-    OFF = "off"
 
 
 class ClaimRepo:

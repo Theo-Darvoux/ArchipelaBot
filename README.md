@@ -17,34 +17,27 @@ pont de chat. Tous les checks vont dans un post à part, dans un forum de suivi 
    cp .env.example .env   # puis remplis DISCORD_TOKEN (et DEV_GUILD_ID pour un serveur de test)
    uv run archipelabot
    ```
-4. Sur Discord, crée un salon **forum** puis lance `/config forum salon:#ton-forum`.
-5. Pour le suivi complet, crée un second forum (par exemple `#suivi-complet`), retire aux membres *Envoyer des messages*
-   et *Envoyer des messages dans les fils*, puis lance `/config suivi salon:#suivi-complet`.
+4. Sur Discord, crée un salon **forum** pour les parties et un second forum pour le suivi complet (par exemple
+   `#suivi-complet`, en retirant aux membres *Envoyer des messages* et *Envoyer des messages dans les fils*), puis
+   choisis-les avec `/config`.
 
 ## Commandes
 
 | Commande | Effet |
 |---|---|
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
-| `/config forum` · `suivi` · `recap` · `annonces` · `apworlds` · `voir` | Configuration du serveur (permission *Gérer le serveur*). `suivi` : le forum où chaque room a son suivi complet (items, morts, hints, release…), le post de la room ne gardant que le chat, les goals et les pings. `annonces` : le rôle pingé quand une partie est annoncée et quand sa room ouvre. `apworlds` : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties |
+| `/config` | Toute la configuration du serveur sur un panneau, chaque réglage avec son menu (permission *Gérer le serveur*). **Forum des parties** : où chaque partie a son post. **Suivi complet** : le forum où chaque room a son suivi complet (items, morts, hints, release…), le post de la room ne gardant que le chat, les goals et les pings. **Récaps** : un salon où publier aussi les récaps. **Apworlds** : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties. **Annonces** : le rôle pingé quand une partie est annoncée et quand sa room ouvre. **Création des parties** : tous les membres ou les admins seulement |
+| Bouton **Gérer** du post d'inscriptions | **Modifier** la partie (nom, date, description), corriger les **Yamls** de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire), ou **Annuler la partie** (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
+| Bouton **Gérer** du panneau d'une room | **Reconnecter** (en changeant le mot de passe si besoin), **Apworlds** et **Yamls** (room lancée depuis une partie : corriger après coup ceux qui ont servi à générer, puis renvoyer le spoiler avec `/track logique`), **Récap** (podium, chiffres, graphique, même une fois le suivi arrêté), **Arrêter** (avec ou sans récap, ou retour aux inscriptions après un mauvais lien), et ce qu'affiche le suivi complet. Réservé à qui a lancé le suivi et aux modérateurs |
 | `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
 | `/partie lancer [release] [collect] [remaining] [cout_hint] [mot_de_passe]` | Dans le post d'une partie en inscriptions : le bot génère la partie avec les yamls et apworlds du post, l'héberge lui-même et la suit dans ce post (voir plus bas). Réservé à qui l'a annoncée et aux modérateurs |
-| `/partie annuler` | Dans le post d'une partie en inscriptions : l'annuler (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
-| `/partie yamls` | Dans le post d'une partie, en inscriptions ou après le lancement : voir, retirer ou remplacer les yamls de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire). Après le lancement, pour regénérer la room ; renvoie ensuite le spoiler avec `/track logique`. Réservé à qui a annoncé la partie, à qui a lancé le suivi et aux modérateurs |
-| `/partie modifier [nom] [debut] [description]` | Dans le post d'une partie en inscriptions : changer ses infos (`-` pour retirer la date ou la description). Réservé à qui l'a annoncée et aux modérateurs |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
-| `/track reglages` | Dans le post d'une room : choisir ce qui est affiché dans le suivi complet, et couper le pont de chat |
 | `/track logique spoiler:<fichier>` | Dans le post d'une room lancée depuis une partie : avec le spoiler log de la génération, le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique (voir plus bas). Réservé à qui a lancé le suivi et aux modérateurs |
-| `/track apworlds` | Dans le post d'une room lancée depuis une partie : choisir, jeu par jeu, l'apworld qui a servi à générer, parmi ceux du serveur (pour une partie d'avant la gestion des apworlds, ou pour corriger une version). Réservé à qui a lancé le suivi et aux modérateurs |
-| `/apworld envoyer fichier:<.apworld>` | Ajouter un apworld au serveur hors d'une partie : il est ensuite proposé dans les inscriptions et dans `/track apworlds` |
-| `/track reconnect [mot_de_passe]` | Dans le post d'une room : relancer la connexion tout de suite (par exemple après un refus du serveur), en changeant le mot de passe si besoin |
-| `/track stop` | Dans le post d'une room : arrêter le suivi, avec ou sans récap. Dans le post d'une partie, propose aussi de revenir aux inscriptions (mauvais lien, partie à regénérer) : le suivi est oublié, les yamls restent |
+| `/apworld envoyer fichier:<.apworld>` | Ajouter un apworld au serveur hors d'une partie : il est ensuite proposé dans les inscriptions et dans **Gérer** puis **Apworlds** |
 | `/claim slot:<joueur>` · `/unclaim` | Dans le post d'une room : dire quel slot tu joues (ou bouton « Je joue » du panneau) |
 | `/status [joueur]` | Dans le post d'une room : progression détaillée d'un joueur (par défaut, le tien) |
 | `/hints [joueur]` | Dans le post d'une room : tes hints (ou ceux d'un joueur), visibles seulement par toi |
-| `/recap` | Dans le post d'une room : publier le récap (podium, chiffres, graphique), même une fois le suivi arrêté. Réservé à qui a lancé le suivi et aux modérateurs |
-| `/ping [item] [joueur]` | Dans le post d'une room : être prévenu chaque fois que ton slot (ou celui de `joueur`) reçoit cet item. Sans `item` : voir et retirer tes pings |
-| `/notifs` | Où arrivent tes pings `/ping` : mention dans le post de la room, DM, ou rien |
+| `/ping [item] [joueur]` | Dans le post d'une room : être prévenu chaque fois que ton slot (ou celui de `joueur`) reçoit cet item. Sans `item` : voir et retirer tes pings, et choisir de les recevoir en mention dans le post ou en DM |
 | `/historique [joueur]` | Dans le post d'une room ou son suivi complet, même après l'arrêt : tout ce qui s'est passé (items, morts, goals, hints, release…), ou seulement ce qui concerne un joueur, page par page, avec export `.txt` |
 
 ## Déploiement (VPS avec Docker)
@@ -70,7 +63,7 @@ instantanée). Sans, elles sont globales, mais Discord peut mettre jusqu'à une 
 
 ## Une partie, un post
 
-1. `/partie nouvelle` crée le post avec le tag *Inscriptions* et pinge le rôle choisi avec `/config annonces`. La
+1. `/partie nouvelle` crée le post avec le tag *Inscriptions* et pinge le rôle choisi dans `/config` (**Annonces**). La
    date de début s'affiche à l'heure locale de chacun.
 2. Chacun envoie son yaml avec le bouton **Mon yaml** (plusieurs fichiers possibles) ou en le déposant dans le post.
    Le bot lit le nom du slot et le jeu, refuse un nom déjà pris par quelqu'un d'autre, et prévient si un nom dépasse
@@ -104,7 +97,7 @@ Le post devient le suivi de la room, comme avec `/track start`, avec en plus :
 
 Les options de `/partie lancer` sont celles du serveur : `release` et `collect` (par défaut automatiques à
 l'objectif), `remaining` (après l'objectif), le coût des hints (10 %) et un mot de passe. Le serveur sauvegarde la
-partie dans `data/hosted/`, redémarre avec le bot et s'il plante, et s'arrête avec le suivi (`/track stop`, fin de
+partie dans `data/hosted/`, redémarre avec le bot et s'il plante, et s'arrête avec le suivi (**Gérer** puis **Arrêter**, fin de
 partie, ou 7 jours sans check). Revenir aux inscriptions supprime la seed. Avant de générer, `/partie lancer` fait
 la même vérification que **Vérifier** et refuse de lancer s'il reste une valeur refusée.
 
@@ -144,8 +137,8 @@ Tout message écrit dans le post d'une room est relayé dans le chat de la parti
 (« Je joue » ou `/claim`), il apparaît à ton nom : le bot ouvre pour ça une connexion de chat avec ton slot, annoncée
 dans le jeu, et la ferme après une heure sans message. Sinon, il apparaît au nom du slot du bot, signé
 `[Discord] Pseudo:`. Le bot réagit au message s'il a été bloqué (les commandes `!` ne sont jamais relayées) ou
-s'il n'a pas pu partir (bot pas connecté à la room). Les messages du chat de la partie apparaissent dans le fil. Désactivable
-dans `/track reglages`.
+s'il n'a pas pu partir (bot pas connecté à la room). Les messages du chat de la partie apparaissent dans le post. Désactivable
+dans **Gérer** sur le panneau.
 
 ## Développement
 

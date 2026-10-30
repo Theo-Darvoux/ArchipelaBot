@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import aiosqlite
+
 from archipelabot.ap.datapackage import DataPackageStore
 from archipelabot.ap.webhost import WebhostRoom
 from archipelabot.storage.claims import ClaimRepo, NotifMode, NotifPrefs
@@ -85,12 +87,29 @@ async def test_notif_prefs(db):
     prefs = NotifPrefs(db)
     await prefs.load()
     assert prefs.mode(1) == NotifMode.THREAD
+    await prefs.set(1, NotifMode.THREAD)
     await prefs.set(1, NotifMode.DM)
-    await prefs.set(1, NotifMode.OFF)
 
     reloaded = NotifPrefs(db)
     await reloaded.load()
-    assert reloaded.mode(1) == NotifMode.OFF
+    assert reloaded.mode(1) == NotifMode.DM
+
+
+async def test_the_old_nothing_mode_becomes_mentions(tmp_path):
+    path = tmp_path / "old.db"
+    old = await aiosqlite.connect(path)
+    for script in MIGRATIONS[:-1]:
+        await old.executescript(script)
+    await old.execute(f"PRAGMA user_version = {len(MIGRATIONS) - 1}")
+    await old.execute("INSERT INTO user_pref (user_id, notif_mode) VALUES (1, 'off'), (2, 'dm')")
+    await old.commit()
+    await old.close()
+
+    db = await Database.open(path)
+    prefs = NotifPrefs(db)
+    await prefs.load()
+    assert (prefs.mode(1), prefs.mode(2)) == (NotifMode.THREAD, NotifMode.DM)
+    await db.close()
 
 
 async def test_history(db):

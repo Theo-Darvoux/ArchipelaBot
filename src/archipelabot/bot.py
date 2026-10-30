@@ -15,10 +15,11 @@ from .errors import UserError
 from .storage.claims import NotifPrefs
 from .storage.db import Database
 from .storage.guilds import GuildRepo
-from .ui.components import Tone, notice
+from .ui.components import send_error
 from .ui.emojis import ensure_uploaded
 from .ui.games import GameManager
 from .ui.hosting import HostManager
+from .ui.manage import GameManageButton
 from .ui.panel_buttons import ClaimButton, MyHintsButton, PatchButton, SettingsButton
 from .ui.rooms import RoomManager
 from .ui.signup_buttons import CheckButton, YamlButton, YamlsZipButton
@@ -45,23 +46,16 @@ class Tree(app_commands.CommandTree["ArchipelaBot"]):
     async def on_error(
         self, interaction: discord.Interaction["ArchipelaBot"], error: app_commands.AppCommandError
     ) -> None:
-        if isinstance(error, UserError):
-            text = f"{error}"
-        elif isinstance(error, app_commands.MissingPermissions):
-            text = "Tu n'as pas les permissions nécessaires pour cette commande."
+        if isinstance(error, app_commands.MissingPermissions):
+            error = UserError("Tu n'as pas les permissions nécessaires pour cette commande.")
         elif isinstance(error, app_commands.CheckFailure):
-            text = "Cette commande n'est pas disponible ici."
-        else:
+            error = UserError("Cette commande n'est pas disponible ici.")
+        elif not isinstance(error, UserError):
             log.exception(
                 "Unhandled error in /%s", interaction.command and interaction.command.qualified_name, exc_info=error
             )
-            text = "Une erreur inattendue est survenue. Elle a été enregistrée dans les logs."
-
-        view = notice(text, Tone.ERROR)
-        if interaction.response.is_done():
-            await interaction.followup.send(view=view, ephemeral=True)
-        else:
-            await interaction.response.send_message(view=view, ephemeral=True)
+            error = UserError("Une erreur inattendue est survenue. Elle a été enregistrée dans les logs.")
+        await send_error(interaction, error)
 
 
 class ArchipelaBot(commands.Bot):
@@ -101,7 +95,14 @@ class ArchipelaBot(commands.Bot):
         except discord.HTTPException:
             log.warning("Could not upload the bot's icons; falling back to Unicode emojis", exc_info=True)
         self.add_dynamic_items(
-            ClaimButton, MyHintsButton, PatchButton, SettingsButton, YamlButton, YamlsZipButton, CheckButton
+            ClaimButton,
+            MyHintsButton,
+            PatchButton,
+            SettingsButton,
+            YamlButton,
+            YamlsZipButton,
+            CheckButton,
+            GameManageButton,
         )
         await self.load_extensions()
         await self.sync_commands()

@@ -556,7 +556,7 @@ async def test_managers_replace_anyones_yaml_in_the_signups(bot, game):
     interaction = click(bot)
     await buttons_of(await game_manage(bot, record))["Yamls"].callback(interaction)
     view = interaction.response.sent[0]["view"]
-    assert "`opi.yaml` · <@5>" in view_text(view) and "/track logique" not in view_text(view)
+    assert "`opi.yaml` · <@5>" in view_text(view) and "**Logique**" not in view_text(view)
     send = click(bot)
     await parts_of(view)["Envoyer des yamls"].callback(send)
     modal = send.response.sent[0]["modal"]
@@ -601,7 +601,7 @@ async def test_managers_fix_the_yamls_after_the_start(bot, game, ap_server):
     await buttons_of(await room_manage(bot, runtime))["Yamls"].callback(interaction)
     view = interaction.response.sent[0]["view"]
     assert "`carol.yaml` · <@77>\n**Carol** · *ChecksFinder*" in view_text(view)
-    assert "/track logique" in view_text(view)
+    assert "**Gérer** puis **Logique**" in view_text(view)
     files = {f.filename: f for f in await bot.games.files(record)}
     select = parts_of(view)["Retirer des yamls"]
     select._values = [str(files["old.yaml"].id), str(files["extra.yaml"].id)]

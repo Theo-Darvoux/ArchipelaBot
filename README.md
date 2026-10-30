@@ -28,11 +28,11 @@ pont de chat. Tous les checks vont dans un post à part, dans un forum de suivi 
 | `/help` | Comment fonctionne le bot et ce que fait chaque commande |
 | `/config` | Toute la configuration du serveur sur un panneau, chaque réglage avec son menu (permission *Gérer le serveur*). **Forum des parties** : où chaque partie a son post. **Suivi complet** : le forum où chaque room a son suivi complet (items, morts, hints, release…), le post de la room ne gardant que le chat, les goals et les pings. **Récaps** : un salon où publier aussi les récaps. **Apworlds** : le salon texte où vous postez vos apworlds ; le bot reprend tout son historique, puis chaque nouvel apworld posté (✅ en réaction), pour les proposer dans les parties. **Annonces** : le rôle pingé quand une partie est annoncée et quand sa room ouvre. **Création des parties** : tous les membres ou les admins seulement |
 | Bouton **Gérer** du post d'inscriptions | **Modifier** la partie (nom, date, description), corriger les **Yamls** de n'importe qui (un yaml envoyé remplace celui du même slot, et reste à son propriétaire), ou **Annuler la partie** (le post reste, avec le tag *Annulée*). Réservé à qui l'a annoncée et aux modérateurs |
-| Bouton **Gérer** du panneau d'une room | **Reconnecter** (en changeant le mot de passe si besoin), **Apworlds** et **Yamls** (room lancée depuis une partie : corriger après coup ceux qui ont servi à générer, puis renvoyer le spoiler avec `/track logique`), **Récap** (podium, chiffres, graphique, même une fois le suivi arrêté), **Arrêter** (avec ou sans récap, ou retour aux inscriptions après un mauvais lien), et ce qu'affiche le suivi complet. Réservé à qui a lancé le suivi et aux modérateurs |
+| Bouton **Gérer** du panneau d'une room | **Reconnecter** (en changeant le mot de passe si besoin), **Logique** (envoyer le spoiler log de la génération : le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique, voir plus bas), **Apworlds** et **Yamls** (room lancée depuis une partie : corriger après coup ceux qui ont servi à générer, puis renvoyer le spoiler avec **Logique**), **Récap** (podium, chiffres, graphique, même une fois le suivi arrêté), **Arrêter** (avec ou sans récap, ou retour aux inscriptions après un mauvais lien), et ce qu'affiche le suivi complet. Réservé à qui a lancé le suivi et aux modérateurs |
 | `/partie nouvelle [nom] [debut] [description]` | Annonce une partie : crée son post dans le forum, avec les inscriptions ouvertes (voir plus bas). `debut` : « samedi 21h », « demain 20h30 », « 12/10 21h »… |
 | `/partie lancer [release] [collect] [remaining] [cout_hint] [mot_de_passe]` | Dans le post d'une partie en inscriptions : le bot génère la partie avec les yamls et apworlds du post, l'héberge lui-même et la suit dans ce post (voir plus bas). Réservé à qui l'a annoncée et aux modérateurs |
 | `/track start lien:<room ou hôte:port>` | Suit une room : crée son post dans le forum. Dans le post d'une partie en inscriptions, la suit dans ce post |
-| `/track logique spoiler:<fichier>` | Dans le post d'une room lancée depuis une partie : avec le spoiler log de la génération, le panneau et `/status` montrent qui est bloqué et combien de checks chacun peut faire d'après la logique (voir plus bas). Réservé à qui a lancé le suivi et aux modérateurs |
+| `/recap` | Dans le post d'une room, même une fois le suivi arrêté : le récap (podium, chiffres, graphique). Qui a lancé le suivi et les modérateurs le publient dans le post ; pour les autres, il s'affiche en privé |
 | `/apworld envoyer fichier:<.apworld>` | Ajouter un apworld au serveur hors d'une partie : il est ensuite proposé dans les inscriptions et dans **Gérer** puis **Apworlds** |
 | `/claim slot:<joueur>` · `/unclaim` | Dans le post d'une room : dire quel slot tu joues (ou bouton « Je joue » du panneau) |
 | `/status [joueur]` | Dans le post d'une room : progression détaillée d'un joueur (par défaut, le tien) |
@@ -93,7 +93,7 @@ Le post devient le suivi de la room, comme avec `/track start`, avec en plus :
 - l'adresse pour jouer, `HOST_ADDRESS:port`, dans l'annonce et sur le panneau ;
 - **Mes patchs** sur le panneau, pour les jeux qui ont besoin d'un fichier (patch de ROM, mod…) : chacun reçoit,
   visible seulement par lui, les fichiers des slots qu'il joue (ou choisit un slot s'il n'en a pas) ;
-- les bloqués et checks en logique, actifs tout de suite (le bot a la seed, pas besoin de `/track logique`).
+- les bloqués et checks en logique, actifs tout de suite (le bot a la seed, pas besoin de **Logique**).
 
 Les options de `/partie lancer` sont celles du serveur : `release` et `collect` (par défaut automatiques à
 l'objectif), `remaining` (après l'objectif), le coût des hints (10 %) et un mot de passe. Le serveur sauvegarde la
@@ -110,7 +110,7 @@ apworlds du post sur la machine du bot.
 
 Le serveur Archipelago ne connaît pas la logique des jeux : pour savoir à coup sûr qui est bloqué, le bot regénère
 la seed avec Archipelago, à partir des yamls et apworlds du post et de la seed indiquée dans le spoiler log
-(`AP_…_Spoiler.txt`, ou le zip `AP_….zip` qui le contient), envoyé avec `/track logique` (réponse visible seulement
+(`AP_…_Spoiler.txt`, ou le zip `AP_….zip` qui le contient), envoyé avec **Gérer** puis **Logique** (réponse visible seulement
 par toi : le spoiler reste privé). Il vérifie que la regénération donne exactement les mêmes items que la room, puis
 après chaque check calcule, avec les items reçus par chacun :
 

@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 from discord import ui
 
+from ..core.logic import MAX_SPOILER, LogicError, read_spoiler
 from ..core.schedule import ScheduleError, label, parse_start
 from ..errors import UserError
 from ..storage.games import GameRecord
@@ -44,9 +45,12 @@ def can_manage(record: RoomRecord, user_id: int, permissions: discord.Permission
     return user_id == record.created_by or permissions.manage_threads
 
 
-def room_actions(runtime: "RoomRuntime", game: GameRecord | None) -> Callable[[], list[ui.Button]]:
+def room_actions(runtime: "RoomRuntime", game: GameRecord | None) -> Callable[[], list[list[ui.Button]]]:
     async def reconnect(interaction: "Interaction") -> None:
         await interaction.response.send_modal(ReconnectModal(runtime))
+
+    async def logic(interaction: "Interaction") -> None:
+        await interaction.response.send_modal(LogicModal(runtime))
 
     async def apworlds(interaction: "Interaction") -> None:
         assert game is not None
@@ -66,14 +70,13 @@ def room_actions(runtime: "RoomRuntime", game: GameRecord | None) -> Callable[[]
     async def stop(interaction: "Interaction") -> None:
         await interaction.response.send_message(view=stop_view(interaction.client, runtime, game), ephemeral=True)
 
-    def build() -> list[ui.Button]:
-        buttons = [_button("Reconnecter", "reconnecting", reconnect)]
+    def build() -> list[list[ui.Button]]:
+        room = [_button("Reconnecter", "reconnecting", reconnect), _button("Logique", "reachable", logic)]
         if game is not None:
-            buttons += [_button("Apworlds", "apworld", apworlds), _button("Yamls", "yaml", yamls)]
+            room += [_button("Apworlds", "apworld", apworlds), _button("Yamls", "yaml", yamls)]
         return [
-            *buttons,
-            _button("Récap", "trophy", recap),
-            _button("Arrêter", "stopped", stop, discord.ButtonStyle.danger),
+            room,
+            [_button("Récap", "trophy", recap), _button("Arrêter", "stopped", stop, discord.ButtonStyle.danger)],
         ]
 
     return build
@@ -122,6 +125,48 @@ class ReconnectModal(Modal):
         await interaction.client.rooms.reconnect(self.runtime, self.password.value.strip() or None)
         text = f"{E.reconnecting} Reconnexion lancée : le panneau de la room affiche le résultat."
         await interaction.followup.send(view=notice(text, Tone.SUCCESS), ephemeral=True)
+
+
+class LogicModal(Modal):
+    def __init__(self, runtime: "RoomRuntime") -> None:
+        super().__init__(title="Activer la logique", timeout=900)
+        self.runtime = runtime
+        self.upload = ui.FileUpload(max_values=1)
+        self.add_item(
+            ui.Label(
+                text="Le spoiler log",
+                description="AP_…_Spoiler.txt, ou le zip AP_….zip de la génération : le panneau montrera qui est "
+                "bloqué et combien de checks chacun peut faire.",
+                component=self.upload,
+            )
+        )
+
+    async def on_submit(self, interaction: "Interaction") -> None:
+        [spoiler] = self.upload.values
+        if spoiler.size > MAX_SPOILER:
+            raise UserError(f"Fichier trop gros (plus de {MAX_SPOILER // 1024 // 1024} Mo).")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        runtime = self.runtime
+        try:
+            content = await spoiler.read()
+            from_room = await interaction.client.rooms.enable_logic(runtime, read_spoiler(spoiler.filename, content))
+        except LogicError as e:
+            raise UserError(str(e)) from e
+        except discord.HTTPException as e:
+            raise UserError("Impossible de télécharger le fichier.") from e
+        blocked = [md(runtime.tracker.state.name(slot)) for slot, r in runtime.logic.results.items() if r.blocked]
+        text = (
+            f"{E.reachable} Logique activée : le panneau montre maintenant qui est bloqué et combien de checks chacun "
+            "peut faire, d'après la logique du jeu."
+        )
+        if from_room:
+            text += (
+                "\n⚠️ Un des worlds ne se génère jamais deux fois pareil : les items viennent de la room, les règles de "
+                "la regénération. Si ce world tire aussi ses règles au hasard, sa logique peut être fausse."
+            )
+        if blocked:
+            text += f"\n-# Bloqués en ce moment : {', '.join(blocked)}."
+        await interaction.followup.send(view=notice(text, Tone.WARNING if from_room else Tone.SUCCESS), ephemeral=True)
 
 
 def stop_view(bot: "ArchipelaBot", runtime: "RoomRuntime", game: GameRecord | None) -> ConfirmView:

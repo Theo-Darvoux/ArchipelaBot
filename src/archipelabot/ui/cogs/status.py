@@ -10,6 +10,7 @@ from ...errors import UserError
 from ..autocomplete import slot_autocomplete
 from ..components import Tone, notice
 from ..emojis import E
+from ..manage import can_manage
 from ..panel_buttons import hints_for
 from ..render.hints import player_hints_view
 from ..render.status import player_status_view
@@ -78,7 +79,9 @@ class StatusCog(commands.Cog, name="status"):
         if runtime is None:
             raise UserError("Utilise cette commande dans le post d'une room suivie.")
         if not runtime.logic.active:
-            raise UserError(f"Il faut d'abord envoyer le spoiler log avec {self.bot.command_mention('track logique')}.")
+            raise UserError(
+                f"Il faut d'abord envoyer le spoiler log avec {E.settings} **Gérer** puis **Logique** sur le panneau."
+            )
         state, results = runtime.tracker.state, runtime.logic.results
         found = blame(results)
         if found is None:
@@ -97,6 +100,29 @@ class StatusCog(commands.Cog, name="status"):
         text = f"{E.blocked} {who}, c'est TOI qui bloque tout le monde !!!\n-# {names} {wait} tes items."
         allowed = discord.AllowedMentions(users=[discord.Object(user)] if user is not None else False)
         await interaction.response.send_message(view=notice(text, Tone.ERROR), allowed_mentions=allowed)
+
+    @app_commands.command(name="recap", description="Le récap de cette room (podium, chiffres, graphique)")
+    @app_commands.guild_only()
+    async def recap(self, interaction: Interaction) -> None:
+        rooms = self.bot.rooms
+        runtime = rooms.by_thread(interaction.channel_id)
+        record = runtime.record if runtime else await rooms.repo.by_thread(interaction.channel_id or 0)
+        if record is None:
+            raise UserError("Utilise cette commande dans le post d'une room.")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if can_manage(record, interaction.user.id, interaction.permissions):
+            if runtime:
+                await rooms.publish_recap(runtime, announce=False)
+            else:
+                await rooms.publish_stopped_recap(record)
+            await interaction.followup.send(view=notice("Récap publié dans le post.", Tone.SUCCESS), ephemeral=True)
+            return
+        if runtime:
+            state, recap = runtime.tracker.state, await runtime.build_recap()
+        else:
+            state, recap = await rooms.stopped_recap(record)
+        view, files = await rooms.recap_message(state, recap)
+        await interaction.followup.send(view=view, files=files, ephemeral=True)
 
 
 async def setup(bot: "ArchipelaBot") -> None:

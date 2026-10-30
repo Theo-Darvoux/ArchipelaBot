@@ -29,7 +29,18 @@ from .ap_server import AP_DIR, DEV_DIR, SEEDS, requires_ap_server
 from .fakes import FakeAttachment, FakeInteraction, FakeUser, view_text
 from .test_games import game  # noqa: F401
 from .test_panel import T0, make_room
-from .test_track_cog import discord_env, wait_until  # noqa: F401
+from .test_track_cog import buttons_of, discord_env, room_manage, wait_until  # noqa: F401
+
+
+async def send_spoiler(bot, runtime, interaction, attachment) -> None:
+    """Gérer, Logique, then the file in the modal, answered through `interaction`."""
+    opening = FakeInteraction()
+    await buttons_of(await room_manage(bot, runtime))["Logique"].callback(opening)
+    modal = opening.response.sent[0]["modal"]
+    modal.upload._values = [attachment]
+    interaction.client = bot
+    await modal.on_submit(interaction)
+
 
 SPOILER = b"\xef\xbb\xbfArchipelago Version 0.6.8  -  Seed: 20362750649453646926\n\nPlando Options:   None\n"
 DEV_SEED = 20362750649453646926
@@ -311,7 +322,7 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     spoiler = zipfile.ZipFile(SEEDS[-1])
     [name] = [n for n in spoiler.namelist() if n.endswith("_Spoiler.txt")]
     interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
-    await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, spoiler.read(name)))
+    await send_spoiler(bot, runtime, interaction, FakeAttachment(name, spoiler.read(name)))
     assert "Logique activée" in view_text(interaction.followup.sent[0]["view"])
     assert set(runtime.logic.results) == {1, 2, 3} and runtime.record.logic is not None
     assert "en logique" in view_text(runtime.render_panel())
@@ -346,12 +357,10 @@ async def test_logic_from_the_room_post(bot, game, ap_server):  # noqa: F811
     await wait_until(lambda: len(runtime.logic.results) == 3, 60)
     assert runtime.record.logic.version == "0.6.8"
 
-    stranger = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=FakeUser(id=5))
-    with pytest.raises(UserError, match="Seule la personne"):
-        await cog.logic.callback(cog, stranger, spoiler=FakeAttachment(name, b""))
+    assert "Seule la personne" in view_text(await room_manage(bot, runtime, user=5))
     wrong = SPOILER.replace(b"Seed: 2036", b"Seed: 1036")
     with pytest.raises(UserError, match="la seed ne correspond pas"):
-        await cog.logic.callback(cog, interaction, spoiler=FakeAttachment("AP_1_Spoiler.txt", wrong))
+        await send_spoiler(bot, runtime, interaction, FakeAttachment("AP_1_Spoiler.txt", wrong))
 
 
 @requires_ap_server
@@ -373,7 +382,7 @@ async def test_wrong_yamls_are_explained(bot, game, ap_server):  # noqa: F811
     [name] = [n for n in spoiler.namelist() if n.endswith("_Spoiler.txt")]
     interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
     with pytest.raises(UserError, match="pas les mêmes items") as error:
-        await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, spoiler.read(name)))
+        await send_spoiler(bot, runtime, interaction, FakeAttachment(name, spoiler.read(name)))
     assert "\n- `Alice` · Total Strawberries : `20` dans le spoiler, `30` regénéré" in str(error.value)
     assert not runtime.logic.active
 
@@ -404,7 +413,7 @@ async def test_same_options_but_other_items_regenerate_twice(bot, game, ap_serve
     async def logic() -> str:
         interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
         with pytest.raises(UserError, match="pas les mêmes items") as error:
-            await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, content))
+            await send_spoiler(bot, runtime, interaction, FakeAttachment(name, content))
         return str(error.value)
 
     text = await logic()
@@ -425,7 +434,7 @@ async def test_same_options_but_other_items_regenerate_twice(bot, game, ap_serve
     # a world that never generates the same: the room's items, in the regenerated rules
     monkeypatch.setattr(RoomManager, "_regenerate", unstable)
     interaction = FakeInteraction(guild=thread.parent.guild, channel_id=thread.id, user=host)
-    await cog.logic.callback(cog, interaction, spoiler=FakeAttachment(name, content))
+    await send_spoiler(bot, runtime, interaction, FakeAttachment(name, content))
     assert "les items viennent de la room" in view_text(interaction.followup.sent[0]["view"])
     assert len(calls) == 2 and runtime.logic.active and runtime.record.logic.from_room
     monkeypatch.undo()
@@ -451,16 +460,17 @@ async def test_logic_needs_the_yamls_and_archipelago(bot, discord_env, ap_server
     interaction = FakeInteraction(guild=guild)
     await cog.start.callback(cog, interaction, lien=ap_server.address, slot="Alice", mot_de_passe=None, nom=None)
     [thread] = forum.threads
+    runtime = bot.rooms.by_thread(thread.id)
     here = FakeInteraction(guild=guild, channel_id=thread.id, user=interaction.user)
 
     with pytest.raises(UserError, match="pas installé"):
-        await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER))
+        await send_spoiler(bot, runtime, here, FakeAttachment("s.txt", SPOILER))
     status = bot.get_cog("status")
     with pytest.raises(UserError, match="spoiler log"):
         await status.blame.callback(status, here)
     bot.settings.archipelago_path = tmp_path
     (tmp_path / "0.6.8").symlink_to(AP_DIR)
     with pytest.raises(UserError, match="Il faut les yamls"):
-        await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER))
+        await send_spoiler(bot, runtime, here, FakeAttachment("s.txt", SPOILER))
     with pytest.raises(UserError, match=r"0\.6\.7, que le bot n'a pas"):
-        await cog.logic.callback(cog, here, spoiler=FakeAttachment("s.txt", SPOILER.replace(b"0.6.8", b"0.6.7")))
+        await send_spoiler(bot, runtime, here, FakeAttachment("s.txt", SPOILER.replace(b"0.6.8", b"0.6.7")))

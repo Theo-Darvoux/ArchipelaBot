@@ -36,7 +36,7 @@ class SettingsView(View):
         room_name: str,
         settings: RoomSettings,
         save: Callable[[RoomSettings], Awaitable[None]],
-        actions: Callable[[], list[ui.Button]] | None = None,
+        actions: Callable[[], list[list[ui.Button]]] | None = None,
     ) -> None:
         super().__init__(timeout=600)
         self.room_name = room_name
@@ -49,7 +49,8 @@ class SettingsView(View):
         self.clear_items()
         container = ui.Container(ui.TextDisplay(f"### {E.settings} Gérer · {md(self.room_name)}"))
         if self.actions:
-            container.add_item(ui.ActionRow(*self.actions()))
+            for row in self.actions():
+                container.add_item(ui.ActionRow(*row))
             container.add_item(ui.Separator())
         container.add_item(
             ui.TextDisplay(

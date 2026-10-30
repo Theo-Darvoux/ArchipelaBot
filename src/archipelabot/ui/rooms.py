@@ -605,7 +605,7 @@ class RoomManager:
             await self.repo.save_logic(record)
             text = (
                 f"{E.error} Bloqués et checks en logique désactivés : la seed ne se regénère plus pareil "
-                f"(Archipelago {generated.version} sur le bot). Renvoie le spoiler avec `/track logique`."
+                f"(Archipelago {generated.version} sur le bot). Renvoie le spoiler avec **Gérer** puis **Logique**."
             )
             with contextlib.suppress(discord.HTTPException):
                 await runtime.sink.send_view(notice(text, Tone.ERROR))
@@ -688,8 +688,8 @@ class RoomManager:
         recap = await runtime.build_recap()
         await self._post_recap(runtime.sink, runtime.tracker.state, recap, announce=announce)
 
-    async def publish_stopped_recap(self, record: RoomRecord) -> None:
-        """The recap of a room no longer tracked, from what the bot saved, in its post only."""
+    async def stopped_recap(self, record: RoomRecord) -> tuple[RoomState, Recap]:
+        """The recap of a room no longer tracked, from what the bot saved."""
         assert record.id is not None
         state = RoomState(record.address)
         progress = Progress(state)
@@ -702,16 +702,24 @@ class RoomManager:
         if not state.players:
             raise UserError("Le bot n'a rien enregistré sur cette room : pas de récap possible.")
         ended = record.ended_at or datetime.now(UTC)
-        recap = build_recap(record.name, record.created_at, ended, state, progress, events, snapshots)
+        return state, build_recap(record.name, record.created_at, ended, state, progress, events, snapshots)
+
+    async def publish_stopped_recap(self, record: RoomRecord) -> None:
+        """In its post only."""
+        state, recap = await self.stopped_recap(record)
         await self._post_recap(ThreadSink(self.bot, record), state, recap, announce=False)
 
-    async def _post_recap(self, sink: ThreadSink, state: RoomState, recap: Recap, *, announce: bool) -> None:
+    async def recap_message(
+        self, state: RoomState, recap: Recap, thread_url: str | None = None
+    ) -> tuple[ui.LayoutView, list[discord.File]]:
         tz = ZoneInfo(self.bot.settings.timezone)
         chart = await asyncio.to_thread(render_chart, recap, state.name, tz) if recap.series else None
+        view = recap_view(recap, state, chart=chart is not None, thread_url=thread_url)
+        return view, [discord.File(io.BytesIO(chart), CHART_FILENAME)] if chart else []
 
+    async def _post_recap(self, sink: ThreadSink, state: RoomState, recap: Recap, *, announce: bool) -> None:
         async def send(channel: discord.abc.Messageable, thread_url: str | None) -> None:
-            view = recap_view(recap, state, chart=chart is not None, thread_url=thread_url)
-            files = [discord.File(io.BytesIO(chart), CHART_FILENAME)] if chart else []
+            view, files = await self.recap_message(state, recap, thread_url)
             await channel.send(view=view, files=files)
 
         await send(await sink.thread(), None)

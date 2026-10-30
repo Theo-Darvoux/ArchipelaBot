@@ -109,7 +109,7 @@ async def test_stop_and_settings_from_the_post(bot, discord_env, ap_server):
 
     settings_view = await room_manage(bot, runtime)
     settings_view.to_components()
-    assert list(buttons_of(settings_view))[:3] == ["Reconnecter", "Récap", "Arrêter"]
+    assert list(buttons_of(settings_view))[:4] == ["Reconnecter", "Logique", "Récap", "Arrêter"]
     filler_button = next(
         section.accessory for section in settings_view.walk_children()
         if getattr(section, "accessory", None) and "filler" in view_text_of(section)

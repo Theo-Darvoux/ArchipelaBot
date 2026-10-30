@@ -87,7 +87,7 @@ class GameApworldsView(ui.LayoutView):
                 select.callback = self._picked(select, users)
                 container.add_item(ui.ActionRow(select))
         container.add_item(
-            ui.TextDisplay(f"-# Ensuite, renvoie le spoiler avec {self.games.bot.command_mention('track logique')}.")
+            ui.TextDisplay(f"-# Ensuite, renvoie le spoiler avec {E.settings} **Gérer** puis **Logique**.")
         )
         self.add_item(container)
 
@@ -154,7 +154,7 @@ class GameYamlsView(ui.LayoutView):
         else:
             footer = (
                 "-# Un yaml envoyé ici ou dans ce fil remplace celui du même slot. Ensuite, renvoie le spoiler avec "
-                f"{self.games.bot.command_mention('track logique')}."
+                f"{E.settings} **Gérer** puis **Logique**."
             )
         container.add_item(ui.TextDisplay(footer))
         self.add_item(container)

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import discord
+import pytest
 
 from archipelabot.ap import protocol as p
 from archipelabot.ap.client import ConnectOptions, open_session
@@ -10,6 +11,7 @@ from archipelabot.core import events as ev
 from archipelabot.core.logic import SlotLogic
 from archipelabot.core.progress import Baseline, Progress
 from archipelabot.core.room import RoomState, SlotInfo
+from archipelabot.errors import UserError
 from archipelabot.recap.chart import render_chart
 from archipelabot.recap.stats import build_recap
 from archipelabot.storage.guilds import GuildConfig
@@ -18,7 +20,7 @@ from archipelabot.ui.emojis import E
 from archipelabot.ui.render.recap import duration, recap_view
 
 from .ap_server import requires_ap_server
-from .fakes import FakeInteraction, view_text
+from .fakes import FakeInteraction, FakeUser, view_text
 from .test_track_cog import buttons_of, discord_env, room_manage, track  # noqa: F401
 
 T0 = datetime(2026, 10, 4, 20, 0, tzinfo=UTC)
@@ -161,6 +163,21 @@ async def test_recap_command_posts_in_the_thread(bot, discord_env, ap_server):  
     assert bot.rooms.by_thread(thread.id) is not None  # the room keeps being tracked
     assert not recap_channel.sent  # only the end of the game is announced
 
+    cog = bot.get_cog("status")
+    published = len(thread.messages)
+    player = FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(5))
+    await cog.recap.callback(cog, player)
+    [private] = player.followup.sent
+    assert private["ephemeral"] and view_text(private["view"]).startswith("## 🏆 Récap")
+    assert len(thread.messages) == published  # a player only sees it
+
+    host = FakeInteraction(guild=guild, channel_id=thread.id)
+    await cog.recap.callback(cog, host)
+    assert "Récap publié dans le post" in view_text(host.followup.sent[0]["view"])
+    assert len(thread.messages) == published + 1
+    with pytest.raises(UserError, match="dans le post d'une room"):
+        await cog.recap.callback(cog, FakeInteraction(guild=guild, channel_id=12345))
+
 
 @requires_ap_server
 async def test_recap_of_a_stopped_room(bot, discord_env, ap_server):  # noqa: F811
@@ -184,6 +201,11 @@ async def test_recap_of_a_stopped_room(bot, discord_env, ap_server):  # noqa: F8
     assert "Récap publié" in view_text(interaction.followup.sent[0]["view"])
     [recap] = [m for m in thread.messages if m.text.startswith("## 🏆 Récap")]
     assert "Finie · 3 joueurs" in recap.text
+
+    cog = bot.get_cog("status")
+    player = FakeInteraction(guild=guild, channel_id=thread.id, user=FakeUser(5))
+    await cog.recap.callback(cog, player)
+    assert "Finie · 3 joueurs" in view_text(player.followup.sent[0]["view"])
     assert "🥇 **Carol** · *ChecksFinder* · en " in recap.text and "Alice · *Celeste 64* · 0 %" in recap.text
 
 

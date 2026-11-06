@@ -17,6 +17,7 @@ RUN for version in $ARCHIPELAGO_VERSIONS; do \
         || exit 1; \
     done
 ENV ARCHIPELAGO_PATH=/opt/Archipelago
+RUN useradd --create-home --uid 1000 archipelabot && mkdir /data && chown archipelabot /data /opt/Archipelago/*
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
@@ -24,7 +25,6 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev
 
-RUN useradd --create-home --uid 1000 archipelabot && mkdir /data && chown archipelabot /data
 USER archipelabot
 
 ENV DATABASE_PATH=/data/archipelabot.db

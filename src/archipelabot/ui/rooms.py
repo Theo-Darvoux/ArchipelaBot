@@ -366,7 +366,11 @@ class RoomRuntime:
             await self._on_connection(event)
 
     async def _on_connection(self, event: ev.ConnectionChanged) -> None:
-        if event.state == ev.ConnectionState.CONNECTED and event.address != self.record.address:
+        if (
+            event.state == ev.ConnectionState.CONNECTED
+            and not self.record.hosting
+            and event.address != self.record.address
+        ):
             self.record.address = event.address
             await self.repo.save_address(self.record)
         if tag := CONNECTION_TAGS.get(event.state):
@@ -735,6 +739,11 @@ class RoomManager:
         for record in await self.repo.active():
             if record.hosting:
                 await self.bot.hosting.resume(record)
+                if self.bot.settings.host_address:
+                    address = self.bot.hosting.public_address(record.hosting)
+                    if record.address != address:
+                        record.address = address
+                        await self.repo.save_address(record)
             try:
                 tracker = self.build_tracker(record)
                 runtime = await self.attach(record, tracker)

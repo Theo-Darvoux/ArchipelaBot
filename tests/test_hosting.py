@@ -181,6 +181,8 @@ async def test_a_hosted_game(hosting_bot, game):  # noqa: F811
 
     # After a restart, the server starts again from its save.
     await bot.rooms.shutdown()
+    runtime.record.address = hosting.local_address  # saved by older versions of the bot
+    await bot.rooms.repo.save_address(runtime.record)
     await bot.hosting.shutdown()
     bot.hosting = HostManager(bot)
     bot.rooms = RoomManager(bot)
@@ -188,6 +190,8 @@ async def test_a_hosted_game(hosting_bot, game):  # noqa: F811
     runtime = bot.rooms.by_thread(thread.id)
     await wait_until(lambda: runtime.tracker.state.connection == ev.ConnectionState.CONNECTED, 60)
     assert "Mes patchs" in button_labels(runtime.render_panel())  # the patch written above
+    assert runtime.record.address == address and address in view_text(runtime.render_panel())
+    assert (await bot.rooms.repo.get(runtime.record.id)).address == address
     carol = await open_session(hosting.local_address, dataclasses.replace(CAROL, password="secret"))
     assert set(checked) <= set(carol.connected.checked_locations)
     await carol.close()

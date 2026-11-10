@@ -38,6 +38,8 @@ async def next_matching(session, predicate, wait=5.0):
 async def test_unreachable_server_raises():
     with pytest.raises(APConnectionError):
         await open_session(f"127.0.0.1:{free_port()}", BOT)
+    with pytest.raises(APConnectionError, match="wss://"):
+        await open_session("unreachable.invalid:38281", BOT)
 
 
 @requires_ap_server

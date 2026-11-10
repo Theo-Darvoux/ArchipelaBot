@@ -183,7 +183,8 @@ async def open_session(address: str, options: ConnectOptions) -> APSession:
     errors: list[str] = []
     for url in candidate_urls(address):
         try:
-            ws = await websockets.connect(url, max_size=None, open_timeout=HANDSHAKE_TIMEOUT, ssl=_tls(url))
+            tls = {"ssl": context} if (context := _tls(url)) else {}
+            ws = await websockets.connect(url, max_size=None, open_timeout=HANDSHAKE_TIMEOUT, **tls)
         except (OSError, ssl.SSLError, websockets.WebSocketException, TimeoutError) as e:
             errors.append(f"{url}: {e}")
             continue

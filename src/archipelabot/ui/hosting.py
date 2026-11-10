@@ -134,7 +134,10 @@ class HostManager:
             install = pick_install(installs, hosting.version)
         except LogicError as e:
             raise UserError(str(e)) from e
-        return HostedServer(install.python, install.path, self.folder(hosting), hosting, password)
+        return HostedServer(
+            install.python, install.path, self.folder(hosting), hosting, password,
+            cert=settings.host_cert, cert_key=settings.host_cert_key,
+        )  # fmt: skip
 
     async def resume(self, record: RoomRecord) -> None:
         """Start the server of a room hosted before a restart, in the background."""

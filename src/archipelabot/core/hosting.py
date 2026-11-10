@@ -51,7 +51,7 @@ class Hosting:
 
     @property
     def local_address(self) -> str:
-        return f"ws://127.0.0.1:{self.port}"
+        return f"127.0.0.1:{self.port}"
 
 
 def parse_ports(text: str) -> range:
@@ -122,6 +122,8 @@ class HostedServer:
         hosting: Hosting,
         password: str | None = None,
         *,
+        cert: Path | None = None,
+        cert_key: Path | None = None,
         restart_delay: float = RESTART_DELAY,
     ) -> None:
         self.python = python
@@ -130,6 +132,8 @@ class HostedServer:
         self.port = hosting.port
         self.options = hosting.options
         self.password = password
+        self.cert = cert
+        self.cert_key = cert_key
         self.restart_delay = restart_delay
         self.process: asyncio.subprocess.Process | None = None
         self._watch: asyncio.Task[None] | None = None
@@ -154,6 +158,10 @@ class HostedServer:
         args += self.options.args()
         if self.password:
             args += ["--password", self.password]
+        if self.cert:
+            args += ["--cert", str(self.cert)]
+            if self.cert_key:
+                args += ["--cert_key", str(self.cert_key)]
         with (self.folder / LOG_NAME).open("ab") as out:
             self.process = await asyncio.create_subprocess_exec(
                 *args, cwd=self.archipelago, stdin=asyncio.subprocess.PIPE, stdout=out, stderr=out,

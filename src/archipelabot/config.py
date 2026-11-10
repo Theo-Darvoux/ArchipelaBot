@@ -18,3 +18,6 @@ class Settings(BaseSettings):
     # the address players use to reach the bot's machine: games hosted by the bot are only possible with it
     host_address: str | None = None
     host_ports: str = "38281-38300"
+    # a certificate for host_address, so browser games (which need wss://) can connect
+    host_cert: Path | None = None
+    host_cert_key: Path | None = None

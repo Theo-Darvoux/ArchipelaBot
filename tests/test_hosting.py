@@ -1,10 +1,12 @@
 import dataclasses
 import socket
+import subprocess
+import zipfile
 
 import pytest
 
 from archipelabot.ap import protocol as p
-from archipelabot.ap.client import ConnectOptions, open_session
+from archipelabot.ap.client import APConnectionError, ConnectOptions, open_session
 from archipelabot.core import events as ev
 from archipelabot.core.hosting import (
     HostedServer,
@@ -22,7 +24,7 @@ from archipelabot.ui.manage import LaunchButton
 from archipelabot.ui.panel_buttons import PatchButton
 from archipelabot.ui.rooms import RoomManager
 
-from .ap_server import AP_DIR, DEV_DIR, free_port, requires_ap_server
+from .ap_server import AP_DIR, DEV_DIR, SEEDS, free_port, requires_ap_server
 from .fakes import FakeAttachment, FakeInteraction, button_labels, view_text
 from .test_games import click, game  # noqa: F401
 from .test_track_cog import discord_env, wait_until  # noqa: F401
@@ -236,3 +238,33 @@ async def test_a_server_that_cannot_start_is_reported(tmp_path):
     with pytest.raises(HostingError, match="s'est arrêté au démarrage"):
         await server.start()
     assert not server.running
+
+
+@pytest.fixture
+def certificate(tmp_path):
+    cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=play.example",
+         "-keyout", str(key), "-out", str(cert)],
+        check=True, capture_output=True,
+    )  # fmt: skip
+    return cert, key
+
+
+@requires_ap_server
+async def test_a_server_with_a_certificate_uses_tls(tmp_path, certificate):
+    with zipfile.ZipFile(SEEDS[-1]) as seed:
+        [name] = [n for n in seed.namelist() if n.endswith(".archipelago")]
+        (tmp_path / name).write_bytes(seed.read(name))
+    cert, key = certificate
+    hosting = Hosting("1", free_port(), "0.6.8")
+    server = HostedServer(AP_DIR / ".venv" / "bin" / "python", AP_DIR, tmp_path, hosting, cert=cert, cert_key=key)
+    await server.start()
+    try:
+        carol = await open_session(hosting.local_address, CAROL)
+        assert carol.url.startswith("wss://")
+        await carol.close()
+        with pytest.raises(APConnectionError):
+            await open_session(f"ws://127.0.0.1:{hosting.port}", CAROL)
+    finally:
+        await server.stop()

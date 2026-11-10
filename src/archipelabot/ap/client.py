@@ -12,6 +12,7 @@ import ssl
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import websockets
 from websockets.asyncio.client import ClientConnection
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 DEFAULT_PORT = 38281
 HANDSHAKE_TIMEOUT = 15
 REQUEST_TIMEOUT = 30
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
 class APError(Exception):
@@ -49,6 +51,16 @@ def candidate_urls(address: str) -> list[str]:
     if ":" not in address.rsplit("]", 1)[-1]:
         address = f"{address}:{DEFAULT_PORT}"
     return [f"wss://{address}", f"ws://{address}"]
+
+
+def _tls(url: str) -> ssl.SSLContext | None:
+    """Servers the bot hosts have a certificate for their public name, not for the loopback address it uses."""
+    if urlsplit(url).scheme != "wss" or urlsplit(url).hostname not in LOOPBACK:
+        return None
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,7 +183,7 @@ async def open_session(address: str, options: ConnectOptions) -> APSession:
     errors: list[str] = []
     for url in candidate_urls(address):
         try:
-            ws = await websockets.connect(url, max_size=None, open_timeout=HANDSHAKE_TIMEOUT)
+            ws = await websockets.connect(url, max_size=None, open_timeout=HANDSHAKE_TIMEOUT, ssl=_tls(url))
         except (OSError, ssl.SSLError, websockets.WebSocketException, TimeoutError) as e:
             errors.append(f"{url}: {e}")
             continue

@@ -108,6 +108,13 @@ pour les joueurs), et les ports de `HOST_PORTS` (par défaut `38281-38300`, une 
 `compose.yaml`, et autorisés par le pare-feu de la machine. Comme la logique, la génération exécute le code des
 apworlds du post sur la machine du bot.
 
+Les jeux qui tournent dans un navigateur (Candy Box 2…) ne peuvent se connecter qu'en `wss://` : il faut un
+certificat pour `HOST_ADDRESS` (un nom de domaine, par exemple avec Let's Encrypt), donné par `HOST_CERT`
+(`fullchain.pem`) et `HOST_CERT_KEY` (`privkey.pem`). Le bot doit pouvoir les lire : avec Docker, copie-les dans
+`data/` (par exemple avec un hook `--deploy-hook` de certbot) et indique leur chemin dans le conteneur
+(`/data/…`). Les serveurs lancés ensuite n'acceptent que `wss://`, ce que font les clients officiels. Un serveur
+lit son certificat au démarrage : après un renouvellement, il garde l'ancien jusqu'à son prochain redémarrage.
+
 ## Bloqués et checks en logique
 
 Le serveur Archipelago ne connaît pas la logique des jeux : pour savoir à coup sûr qui est bloqué, le bot regénère

@@ -135,8 +135,7 @@ class LogicModal(Modal):
         self.add_item(
             ui.Label(
                 text="Le spoiler log",
-                description="AP_…_Spoiler.txt, ou le zip AP_….zip de la génération : le panneau montrera qui est "
-                "bloqué et combien de checks chacun peut faire.",
+                description="AP_…_Spoiler.txt, ou le zip AP_….zip de la génération.",
                 component=self.upload,
             )
         )
